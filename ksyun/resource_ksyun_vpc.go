@@ -1,169 +1,127 @@
+/*
+Provides a VPC resource.
+
+~> **Note**  The network segment can only be created or deleted, can not perform both of them at the same time.
+
+Example Usage
+
+```hcl
+resource "ksyun_vpc" "example" {
+  vpc_name   = "ksyun_vpc_tf"
+  cidr_block = "10.1.0.2/24"
+}
+
+Import
+
+VPC can be imported using the `id`, e.g.
+
+```
+$ terraform import ksyun_vpc.example vpc-abc123456
+```
+*/
+
 package ksyun
 
 import (
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"time"
 )
 
-func resourceKsyunVPC() *schema.Resource {
+func resourceKsyunVpc() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceKsyunVPCCreate,
-		Update: resourceKsyunVPCUpdate,
-		Read:   resourceKsyunVPCRead,
-		Delete: resourceKsyunVPCDelete,
+		Create: resourceKsyunVpcCreate,
+		Update: resourceKsyunVpcUpdate,
+		Read:   resourceKsyunVpcRead,
+		Delete: resourceKsyunVpcDelete,
 		Importer: &schema.ResourceImporter{
 			State: schema.ImportStatePassthrough,
 		},
 		Schema: map[string]*schema.Schema{
 			"vpc_name": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ForceNew:     false,
-				ValidateFunc: validateName,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The name of the vpc.",
 			},
 
 			"cidr_block": {
 				Type:         schema.TypeString,
 				Optional:     true,
+				ForceNew:     true,
 				ValidateFunc: validateCIDRNetworkAddress,
+				Description:  "The CIDR blocks of VPC.",
+			},
+
+			"provided_ipv6_cidr_block": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				ForceNew:    true,
+				Description: "whether support IPV6 CIDR blocks. <br> NOTES: providing a part of regions now.",
 			},
 
 			"is_default": {
-				Type:     schema.TypeBool,
-				ForceNew: true,
-				Default:  false,
-				Optional: true,
+				Type:        schema.TypeBool,
+				ForceNew:    true,
+				Default:     false,
+				Optional:    true,
+				Description: "Whether the VPC is default or not.",
 			},
 			"create_time": {
-				Type:     schema.TypeString,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The time of creation for VPC.",
+			},
+			"ipv6_cidr_block_association_set": {
+				Type:     schema.TypeList,
 				Computed: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"ipv6_cidr_block": {
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "the Ipv6 of this vpc bound.",
+						},
+					},
+				},
+				Description: "An Ipv6 association list of this vpc.",
 			},
 		},
 	}
 }
 
-func resourceKsyunVPCCreate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-
-	var resp *map[string]interface{}
-	var err error
-	createVpc := make(map[string]interface{})
-
-	creates := []string{
-		"vpc_name",
-		"cidr_block",
-		"is_default",
-	}
-	for _, v := range creates {
-		if v1, ok := d.GetOk(v); ok {
-			vv := Downline2Hump(v)
-			createVpc[vv] = fmt.Sprintf("%v", v1)
-		}
-	}
-	action := "CreateVpc"
-	logger.Debug(logger.ReqFormat, action, createVpc)
-	resp, err = conn.CreateVpc(&createVpc)
-	logger.Debug(logger.AllFormat, action, createVpc, *resp, err)
+func resourceKsyunVpcCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.CreateVpc(d, resourceKsyunVpc())
 	if err != nil {
-		return fmt.Errorf("error on creating vpc, %s", err)
+		return fmt.Errorf("error on creating vpc %q, %s", d.Id(), err)
 	}
-	if resp != nil {
-		vpc := (*resp)["Vpc"].(map[string]interface{})
-		d.SetId(vpc["VpcId"].(string))
-	}
-	return resourceKsyunVPCRead(d, meta)
+	return resourceKsyunVpcRead(d, meta)
 }
 
-func resourceKsyunVPCRead(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-
-	readVpc := make(map[string]interface{})
-	readVpc["VpcId.1"] = d.Id()
-	action := "DescribeVpcs"
-	logger.Debug(logger.ReqFormat, action, readVpc)
-	resp, err := conn.DescribeVpcs(&readVpc)
-	logger.Debug(logger.AllFormat, action, readVpc, *resp, err)
+func resourceKsyunVpcRead(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.ReadAndSetVpc(d, resourceKsyunVpc())
 	if err != nil {
 		return fmt.Errorf("error on reading vpc %q, %s", d.Id(), err)
 	}
-	if resp != nil {
-		items, ok := (*resp)["VpcSet"].([]interface{})
-		if !ok || len(items) == 0 {
-			d.SetId("")
-			return nil
-		}
-		SetDByResp(d, items[0], vpcKeys, map[string]bool{})
-	}
-	return nil
+	return err
 }
 
-func resourceKsyunVPCUpdate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-	attributeUpdate := false
-	d.Partial(true)
-	modifyVpc := make(map[string]interface{})
-	modifyVpc["VpcId"] = d.Id()
-
-	if d.HasChange("vpc_name") && !d.IsNewResource() {
-		modifyVpc["VpcName"] = fmt.Sprintf("%v", d.Get("vpc_name"))
-		attributeUpdate = true
+func resourceKsyunVpcUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.ModifyVpc(d, resourceKsyunVpc())
+	if err != nil {
+		return fmt.Errorf("error on updating vpc %q, %s", d.Id(), err)
 	}
-	if attributeUpdate {
-		action := "ModifyVpc"
-		logger.Debug(logger.ReqFormat, action, modifyVpc)
-		resp, err := conn.ModifyVpc(&modifyVpc)
-		logger.Debug(logger.AllFormat, action, modifyVpc, *resp, err)
-		if err != nil {
-			return fmt.Errorf("error on updating vpc, %s", err)
-		}
-		d.SetPartial("vpc_name")
-	}
-	d.Partial(false)
-	return resourceKsyunVPCRead(d, meta)
+	return resourceKsyunVpcRead(d, meta)
 }
 
-func resourceKsyunVPCDelete(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-	deleteVpc := make(map[string]interface{})
-	deleteVpc["VpcId"] = d.Id()
-	action := "DeleteVpc"
-	return resource.Retry(30*time.Minute, func() *resource.RetryError {
-		logger.Debug(logger.ReqFormat, action, deleteVpc)
-		resp, err1 := conn.DeleteVpc(&deleteVpc)
-		logger.Debug(logger.AllFormat, action, deleteVpc, *resp, err1)
-		if err1 == nil || (err1 != nil && notFoundError(err1)) {
-			return nil
-		}
-		if err1 != nil && inUseError(err1) {
-			return resource.RetryableError(err1)
-		}
-		readVpc := make(map[string]interface{})
-		readVpc["VpcId.1"] = d.Id()
-		action = "DescribeVpcs"
-		logger.Debug(logger.ReqFormat, action, deleteVpc)
-		resp, err := conn.DescribeVpcs(&readVpc)
-		logger.Debug(logger.AllFormat, action, readVpc, *resp)
-		if err != nil && notFoundError(err) {
-			return nil
-		}
-		if err != nil {
-			return resource.NonRetryableError(fmt.Errorf("error on  reading VpcS when delete %q, %s", d.Id(), err))
-		}
-		itemset, ok := (*resp)["VpcSet"]
-		if !ok {
-			return nil
-		}
-		item, ok := itemset.([]interface{})
-		if !ok || len(item) == 0 {
-			return nil
-		}
-		return resource.RetryableError(fmt.Errorf("error on  deleting VpcS %q, %s", d.Id(), err1))
-	})
+func resourceKsyunVpcDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.RemoveVpc(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting vpc %q, %s", d.Id(), err)
+	}
+	return err
 }

@@ -1,12 +1,38 @@
+/*
+Provides an Elastic IP resource.
+
+Example Usage
+
+```hcl
+data "ksyun_lines" "default" {
+  output_file="output_result1"
+  line_name="BGP"
+}
+resource "ksyun_eip" "default" {
+  line_id ="${data.ksyun_lines.default.lines.0.line_id}"
+  band_width =1
+  charge_type = "PostPaidByPeak"
+  purchase_time =1
+  project_id=0
+}
+```
+
+Import
+
+EIP can be imported using the id, e.g.
+
+```
+$ terraform import ksyun_eip.default 67b91d3c-c363-4f57-b0cd-xxxxxxxxxxxx
+```
+*/
+
 package ksyun
 
 import (
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"time"
 )
 
 func resourceKsyunEip() *schema.Resource {
@@ -21,225 +47,155 @@ func resourceKsyunEip() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"line_id": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "The id of the line.",
 			},
 			"band_width": {
-				Type:     schema.TypeInt,
-				Required: true,
+				Type:        schema.TypeInt,
+				Required:    true,
+				Description: "The band width of the public address.",
 			},
 			"charge_type": {
 				Type:     schema.TypeString,
-				Required: true,
 				ForceNew: true,
+				Required: true,
 				ValidateFunc: validation.StringInSlice([]string{
 					"PrePaidByMonth",
+					"Monthly",
 					"PostPaidByPeak",
+					"Peak",
 					"PostPaidByDay",
+					"Daily",
 					"PostPaidByTransfer",
+					"TrafficMonthly",
+					"DailyPaidByTransfer",
+					"HourlySettlement",
 					"PostPaidByHour",
 					"HourlyInstantSettlement",
+					"PostpaidByTime",
 				}, false),
+				DiffSuppressFunc: chargeSchemaDiffSuppressFunc,
+				Description: "The charge type of the Elastic IP address.Valid Values:'PrePaidByMonth','Monthly','PostPaidByPeak','Peak','PostPaidByDay','Daily','PostPaidByTransfer','TrafficMonthly','DailyPaidByTransfer','HourlySettlement','PostPaidByHour','HourlyInstantSettlement','PostpaidByTime'. \n" +
+					"**Notes:** Charge Type have a upgrade, The above-mentioned parameters, **every**, are **valid**. The changes as following:\n\n" +
+					"| Previous Version | Current Version | Description | \n" +
+					"| -------- | -------- | ----------- | \n" +
+					"| PostPaidByPeak | Peak| Pay-as-you-go (monthly peak) | \n " +
+					"| PostPaidByDay | Daily | Pay-as-you-go (daily) | \n" +
+					"| PostPaidByTransfer | TrafficMonthly | Pay-as-you-go (monthly traffic) |\n " +
+					"| PrePaidByMonth | Monthly | Monthly package | \n" +
+					"|                | DailyPaidByTransfer | Pay-as-you-go (daily traffic) | \n" +
+					"|                | HourlyInstantSettlement | Pay-as-you-go (hourly instant settlement) | \n" +
+					"|                | PostPaidByHour | Pay-as-you-go (hourly billing, monthly settlement) | \n" +
+					"|                | PostpaidByTime | Settlement by times |.",
 			},
 			"purchase_time": {
-				Type:     schema.TypeInt,
-				Required: true,
+				Type:             schema.TypeInt,
+				Optional:         true,
+				DiffSuppressFunc: purchaseTimeDiffSuppressFunc,
+				ForceNew:         true,
+				ValidateFunc:     validation.IntBetween(0, 36),
+				Description:      "Purchase time. If charge_type is Monthly or PrePaidByMonth, this is Required.",
 			},
 			"project_id": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Default:     0,
+				Description: "The id of the project.",
+				// Computed:    true,
 			},
+			"tags": tagsSchema(),
 
 			"instance_id": {
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "the ID of the EIP.",
 			},
 			"state": {
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "state of the EIP.",
 			},
 
 			"instance_type": {
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The instance type to bind with the EIP.",
 			},
 
 			"public_ip": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The Elastic IP address.",
 			},
 			"allocation_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "the ID of the EIP.",
 			},
 			"create_time": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "creation time of the EIP.",
 			},
 			"network_interface_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "NetworkInterface ID.",
 			},
 			"internet_gateway_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "InternetGateway ID.",
 			},
 			"band_width_share_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "the ID of the BWS which the EIP associated.",
 			},
 			"is_band_width_share": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "BWS EIP.",
 			},
 		},
 	}
 }
-func resourceKsyunEipCreate(d *schema.ResourceData, m interface{}) error {
-	eipConn := m.(*KsyunClient).eipconn
-	createEip := make(map[string]interface{})
-	creates := []string{
-		"line_id",
-		"band_width",
-		"charge_type",
-		"purchase_time",
-		"project_id",
-	}
-	for _, v := range creates {
-		if v1, ok := d.GetOk(v); ok {
-			vv := Downline2Hump(v)
-			createEip[vv] = fmt.Sprintf("%v", v1)
-		}
-	}
-	action := "AllocateAddress"
-	logger.Debug(logger.ReqFormat, action, createEip)
-	resp, err := eipConn.AllocateAddress(&createEip)
-	logger.Debug(logger.AllFormat, action, createEip, *resp, err)
+
+func resourceKsyunEipCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	eipService := EipService{meta.(*KsyunClient)}
+	err = eipService.CreateAddress(d, resourceKsyunEip())
 	if err != nil {
-		return fmt.Errorf("createEip Error  : %s", err)
+		return fmt.Errorf("error on creating address %q, %s", d.Id(), err)
 	}
-	id, ok := (*resp)["AllocationId"]
-	if !ok {
-		return fmt.Errorf("createEip Error  : no id found")
-	}
-	idres, ok := id.(string)
-	if !ok {
-		return fmt.Errorf("createEip Error : no id found")
-	}
-	if err := d.Set("allocation_id", idres); err != nil {
-		return err
-	}
-	d.SetId(idres)
-	return resourceKsyunEipRead(d, m)
+	return resourceKsyunEipRead(d, meta)
 }
 
-func resourceKsyunEipRead(d *schema.ResourceData, m interface{}) error {
-	eipConn := m.(*KsyunClient).eipconn
-	readEip := make(map[string]interface{})
-	readEip["AllocationId.1"] = d.Id()
-	if pd, ok := d.GetOk("project_id"); ok {
-		readEip["ProjectId.1"] = fmt.Sprintf("%v", pd)
-	}
-	action := "DescribeAddresses"
-	logger.Debug(logger.ReqFormat, action, readEip)
-	resp, err := eipConn.DescribeAddresses(&readEip)
-	logger.Debug(logger.AllFormat, action, readEip, *resp, err)
+func resourceKsyunEipRead(d *schema.ResourceData, meta interface{}) (err error) {
+	eipService := EipService{meta.(*KsyunClient)}
+	err = eipService.ReadAndSetAddress(d, resourceKsyunEip())
 	if err != nil {
-		return fmt.Errorf("Error  : %s", err)
+		return fmt.Errorf("error on reading address %q, %s", d.Id(), err)
 	}
-	itemset, ok := (*resp)["AddressesSet"]
-	if !ok {
-		d.SetId("")
-		return nil
-	}
-	items, ok := itemset.([]interface{})
-	if !ok || len(items) == 0 {
-		d.SetId("")
-		return nil
-	}
-	SetDByResp(d, items[0], eipKeys, map[string]bool{})
-	return nil
+	return err
 }
 
-func resourceKsyunEipUpdate(d *schema.ResourceData, m interface{}) error {
-	eipConn := m.(*KsyunClient).eipconn
-	// Enable partial attribute modification
-	d.Partial(true)
-	// Whether the representative has any modifications
-	attributeUpdate := false
-	updateReq := make(map[string]interface{})
-	updateReq["AllocationId"] = d.Id()
-	// modify
-	if d.HasChange("band_width") && !d.IsNewResource() {
-		if v, ok := d.GetOk("band_width"); ok {
-			updateReq["BandWidth"] = fmt.Sprintf("%v", v)
-		} else {
-			return fmt.Errorf("cann't change bandwidth to empty string")
-		}
-		attributeUpdate = true
+func resourceKsyunEipUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	eipService := EipService{meta.(*KsyunClient)}
+	err = eipService.ModifyAddress(d, resourceKsyunEip())
+	if err != nil {
+		return fmt.Errorf("error on updating address %q, %s", d.Id(), err)
 	}
-	if attributeUpdate {
-		action := "ModifyAddress"
-		logger.Debug(logger.ReqFormat, action, updateReq)
-		resp, err := eipConn.ModifyAddress(&updateReq)
-		logger.Debug(logger.AllFormat, action, updateReq, *resp, err)
-		if err != nil {
-			return fmt.Errorf("update eip (%v)error:%v", updateReq, err)
-		}
-		d.SetPartial("band_width")
-	}
-	d.Partial(false)
-	return resourceKsyunEipRead(d, m)
+	return resourceKsyunEipRead(d, meta)
 }
 
-func resourceKsyunEipDelete(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).eipconn
-	//delete
-	deleteEip := make(map[string]interface{})
-	deleteEip["AllocationId"] = d.Id()
-
-	return resource.Retry(25*time.Minute, func() *resource.RetryError {
-		action := "ReleaseAddress"
-		logger.Debug(logger.ReqFormat, action, deleteEip)
-		respp, err1 := conn.ReleaseAddress(&deleteEip)
-		logger.Debug(logger.AllFormat, action, deleteEip, *respp, err1)
-		if err1 == nil || (err1 != nil && notFoundError(err1)) {
-			return nil
-		}
-		if err1 != nil && inUseError(err1) {
-			return resource.RetryableError(err1)
-		}
-
-		//check
-		readEip := make(map[string]interface{})
-		readEip["AllocationId.1"] = d.Id()
-		if pd, ok := d.GetOk("project_id"); ok {
-			readEip["ProjectId.1"] = fmt.Sprintf("%v", pd)
-		}
-		action = "DescribeAddresses"
-		logger.Debug(logger.ReqFormat, action, readEip)
-		resp, err := conn.DescribeAddresses(&readEip)
-		logger.Debug(logger.AllFormat, action, readEip, *resp, err)
-		if err != nil && notFoundError(err) {
-			return nil
-		}
-		if err != nil {
-			return resource.NonRetryableError(fmt.Errorf("error on reading eip when deleting %q, %s", d.Id(), err))
-		}
-		itemset, ok := (*resp)["AddressesSet"]
-		if !ok {
-			return nil
-		}
-		item, ok := itemset.([]interface{})
-		if !ok || len(item) == 0 {
-			return nil
-		}
-		return resource.RetryableError(fmt.Errorf("error on  deleting eip %v,%v", d.Id(), err1))
-	})
-
+func resourceKsyunEipDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	eipService := EipService{meta.(*KsyunClient)}
+	err = eipService.RemoveAddress(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting address %q, %s", d.Id(), err)
+	}
+	return err
 }

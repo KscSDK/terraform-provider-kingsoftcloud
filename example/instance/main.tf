@@ -1,33 +1,48 @@
-# Specify the provider and access details
-provider "ksyun" {
-  region = "cn-beijing-6"
+variable "volume_size" {
+  default = 20
 }
-
 resource "ksyun_instance" "default" {
-  image_id="6e37ed46-61a2-4f0a-9f4a-dcdd0817917c"
-  instance_type="S4.1A"
-  system_disk{
-    disk_type="SSD3.0"
-    disk_size=30
+  image_id      = "IMG-cf8fe1f2-68f2-4483-ae33-ba463c203278"
+  instance_type = "N3.1A"
+  //  local_volume_snapshot_id = "1111111111"
+  key_id        = ["0dd40a91-5712-4b8a-a4d7-f9d9412c9d2b", "9c45b560-e51d-4aee-9e99-0e292476692d"]
+  system_disk {
+    disk_type = "SSD3.0"
+    disk_size = 40
   }
-  data_disk_gb=0
+
+  ## data_disks可以定义机型数据盘，但在使用上不够灵活
+  ## 建议使用resource_ksyun_volume定义数据盘，用resource_ksyun_volume_attach定义盘和主机的绑定关系，以便更灵活的实现绑定和解绑
+  #  data_disks {
+  #    disk_type            = "SSD3.0"
+  #    disk_size            = var.volume_size
+  #    delete_with_instance = true
+  #
+  #    # 使用快照创建数据盘
+  #    # disk_snapshot_id = "disk_snapshot_id"
+  #  }
+
+  //  data_disk_gb=0
   #only support part type
-  subnet_id="2ea4195d-8111-4cd8-91da-6a34bb06663b"
-  instance_password="Xuan663222"
-  keep_image_login=false
-  charge_type="Daily"
-  purchase_time=1
-  security_group_id=["6e3dee9c-291c-4647-bfc2-4c1eaa93fb80"]
-  private_ip_address=""
-  instance_name="xuan-tf"
-  instance_name_suffix=""
-  sriov_net_support="false"
-  project_id=0
-  data_guard_id=""
-  key_id=[]
-  d_n_s1 =""
-  d_n_s2 =""
-  force_delete =true
-  user_data=""
-  host_name="xuan-tf"
+  subnet_id              = "05c45fcf-405e-441a-8842-a26809595a3e"
+  //  instance_password="Aa123456"
+  keep_image_login       = false
+  charge_type            = "Daily"
+  //  purchase_time=1
+  security_group_id      = ["35ac2642-1958-4ed7-b02c-dc86f27bc9d9", "7e2f45b5-e79d-4612-a7fc-fe74a50b639a"]
+  //  private_ip_address=""
+  instance_name          = "xym-new-1"
+  //  sriov_net_support="false"
+  project_id             = 0
+  //  data_guard_id=""
+  //  force_delete =true
+  user_data="IyEvYmluL2Jhc2gKCmVjaG8gIjEyMyIKClRGX0xPRz1kZWJ1ZyB0ZXJyYWZvcm0gaW1wb3J0IGtzeXVuX3RhZy5pbXBvcnRfZXhhbXBsZSAyMjI6cnJlcix2cGM6N2ZmNTcyMjItMjdkZi00MmY0LTg5Y2QtODI0ODZhZjQwZTZk"
+  //  iam_role_name = "KsyunKECImageImportDefaultRole"
+  force_reinstall_system = false
+  instance_status        = "active"
+  //  dns1 = "198.18.254.30"
+  //  dns2 = "198.18.254.31"
+  tags                   = {
+    "xym-test" = "sdsds",
+  }
 }

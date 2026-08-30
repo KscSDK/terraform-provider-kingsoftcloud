@@ -1,13 +1,32 @@
+/*
+Provides a Load Balancer resource.
+
+# Example Usage
+
+```hcl
+
+	resource "ksyun_lb" "default" {
+	  vpc_id = "74d0a45b-472d-49fc-84ad-221e21ee23aa"
+	  load_balancer_name = "tf-xun1"
+	  type = "public"
+	}
+
+```
+
+# Import
+
+LB can be imported using the `id`, e.g.
+
+```
+$ terraform import ksyun_lb.example fdeba8ca-8aa6-4cd0-8ffa-52ca9e9fef42
+```
+*/
 package ksyun
 
 import (
-	"encoding/json"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"strings"
-	"time"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
 
 func resourceKsyunLb() *schema.Resource {
@@ -22,245 +41,151 @@ func resourceKsyunLb() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"vpc_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The ID of the VPC linked to the Load Balancers.",
 			},
 			"load_balancer_name": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "The name of the load balancer.",
 			},
 			"type": {
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
+				Default:  "public",
+				ValidateFunc: validation.StringInSlice([]string{
+					"public",
+					"internal",
+				}, false),
+				ForceNew:    true,
+				Description: "The type of load balancer.Valid Values:'public', 'internal'.",
 			},
 			"subnet_id": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:             schema.TypeString,
+				Optional:         true,
+				ForceNew:         true,
+				Computed:         true,
+				DiffSuppressFunc: loadBalancerDiffSuppressFunc,
+				Description:      "The id of the subnet.only Internal type is Required.",
 			},
 			"private_ip_address": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:             schema.TypeString,
+				Optional:         true,
+				ForceNew:         true,
+				Computed:         true,
+				DiffSuppressFunc: loadBalancerDiffSuppressFunc,
+				Description:      "The internal Load Balancers can set an private ip address in Reserve Subnet.",
 			},
 
-			"public_ip": {
-				Type:     schema.TypeString,
-				Computed: true,
+			"project_id": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				Description: "ID of the project.",
 			},
 
-			"load_balancer_id": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"state": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
 			"load_balancer_state": {
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
+				Default:  "start",
+				ValidateFunc: validation.StringInSlice([]string{
+					"start",
+					"stop",
+				}, false),
+				Description: "The Load Balancers state.Valid Values:'start', 'stop'.",
 			},
-			"create_time": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"is_waf": {
-				Type:     schema.TypeBool,
-				Computed: true,
-			},
-			"project_id": {
-				Type:     schema.TypeInt,
-				Optional: true,
-			},
+
 			"ip_version": {
 				Type:     schema.TypeString,
 				Optional: true,
+				Default:  "ipv4",
+				ValidateFunc: validation.StringInSlice([]string{
+					"all",
+					"ipv4",
+					"ipv6",
+				}, false),
+				ForceNew:    true,
+				Description: "IP version, valid values: 'all', 'ipv4', 'ipv6'.",
+			},
+
+			"tags": tagsSchema(),
+
+			"public_ip": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The IP address of Public IP. It is `\"\"` if `internal` is `true`.",
+			},
+
+			"load_balancer_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "ID of the LB.",
+			},
+			"state": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "associate or disassociate.",
+			},
+			"create_time": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The time of creation for load balancer.",
+			},
+			"is_waf": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "whether it is a waf LB or not.",
+			},
+			"access_logs_enabled": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Computed:    true,
+				Description: "Default is `false`, Setting the value to `true` to enable the service.",
+			},
+			"access_logs_s3_bucket": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "Bucket for storing access logs.",
 			},
 		},
 	}
 }
-func resourceKsyunLbCreate(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	if v, ok := d.GetOk("vpc_id"); ok {
-		req["VpcId"] = fmt.Sprintf("%v", v)
-	}
-	if v, ok := d.GetOk("load_balancer_name"); ok {
-		req["LoadBalancerName"] = fmt.Sprintf("%v", v)
-	} else {
-		req["LoadBalancerName"] = resource.PrefixedUniqueId("tf-lb-")
-	}
-	if v, ok := d.GetOk("type"); ok {
-		req["Type"] = fmt.Sprintf("%v", v)
-	}
-	if v, ok := d.GetOk("subnet_id"); ok {
-		req["SubnetId"] = fmt.Sprintf("%v", v)
-	}
-	if v, ok := d.GetOk("private_ip_address"); ok {
-		req["PrivateIpAddress"] = fmt.Sprintf("%v", v)
-	}
-	if v, ok := d.GetOk("project_id"); ok {
-		req["ProjectId"] = fmt.Sprintf("%v", v)
-	}
-	action := "CreateLoadBalancer"
-	logger.Debug(logger.ReqFormat, action, req)
-
-	resp, err := slbconn.CreateLoadBalancer(&req)
+func resourceKsyunLbCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.CreateLoadBalancer(d, resourceKsyunLb())
 	if err != nil {
-		return fmt.Errorf("Error CreateLoadBalancer : %s", err)
+		return fmt.Errorf("error on creating lb %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-	id, ok := (*resp)["LoadBalancerId"]
-	if !ok {
-		return fmt.Errorf("Error CreateLoadBalancer : no LoadBalancerId found")
-	}
-	idres, ok := id.(string)
-	if !ok {
-		return fmt.Errorf("Error CreateLoadBalancer : no LoadBalancerId found")
-	}
-	if err := d.Set("load_balancer_id", idres); err != nil {
-		return err
-	}
-	d.SetId(idres)
-	return resourceKsyunLbRead(d, m)
+	return resourceKsyunLbRead(d, meta)
 }
 
-func resourceKsyunLbRead(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["LoadBalancerId.1"] = d.Id()
-	if pd, ok := d.GetOk("project_id"); ok {
-		req["ProjectId.1"] = fmt.Sprintf("%v", pd)
-	}
-	action := "DescribeLoadBalancers"
-	logger.Debug(logger.ReqFormat, action, req)
-	resp, err := slbconn.DescribeLoadBalancers(&req)
+func resourceKsyunLbRead(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.ReadAndSetLoadBalancer(d, resourceKsyunLb())
 	if err != nil {
-		return fmt.Errorf("Error DescribeLoadBalancers : %s", err)
+		return fmt.Errorf("error on reading lb %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-	type describeLoadBalancersStruct struct {
-		LoadBalancerDescriptions []struct {
-			LoadBalancerId    string
-			LoadBalancerName  string
-			IsWaf             bool
-			Type              string
-			VpcId             string
-			LoadBalancerState string
-			CreateTime        string
-			ListenersCount    int
-			ProjectId         string
-			State             string
-			IpVersion         string
-		}
-	}
-	by, err := json.Marshal(resp)
-	if err != nil {
-		return fmt.Errorf("Error DescribeLoadBalancers when marshal : %s", err)
-	}
-	var result describeLoadBalancersStruct
-	err = json.Unmarshal(by, &result)
-	if err != nil {
-		return fmt.Errorf("Error DescribeLoadBalancers when unmarshal: %s", err)
-	}
-	if len(result.LoadBalancerDescriptions) == 0 {
-		d.SetId("")
-		return nil
-	}
-	lb0 := result.LoadBalancerDescriptions[0]
-	SetDByResp(d, lb0, slbKeys, map[string]bool{})
-	return nil
+	return err
 }
 
-func resourceKsyunLbUpdate(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["LoadBalancerId"] = d.Id()
-	if v, ok := d.GetOk("load_balancer_name"); ok {
-		req["LoadBalancerName"] = fmt.Sprintf("%v", v)
+func resourceKsyunLbUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.ModifyLoadBalancer(d, resourceKsyunLb())
+	if err != nil {
+		return fmt.Errorf("error on updating lb %q, %s", d.Id(), err)
 	}
-	if v, ok := d.GetOk("load_balancer_state"); ok {
-		req["LoadBalancerState"] = fmt.Sprintf("%v", v)
-	} else {
-		return fmt.Errorf("cann't change load_balancer_state to empty string")
-	}
-	// Enable partial attribute modification
-	d.Partial(true)
-	// Whether the representative has any modifications
-	attributeUpdate := false
-	if d.HasChange("load_balancer_name") {
-		attributeUpdate = true
-	}
-	if d.HasChange("load_balancer_state") {
-		attributeUpdate = true
-	}
-	if attributeUpdate {
-		action := "ModifyLoadBalancer"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := slbconn.ModifyLoadBalancer(&req)
-		if err != nil {
-			logger.Debug(logger.AllFormat, action+" first", req, *resp, err)
-			if strings.Contains(err.Error(), "400") {
-				time.Sleep(time.Second * 2)
-				resp, err = slbconn.ModifyLoadBalancer(&req)
-				if err != nil {
-					return fmt.Errorf("update Slb (%v)error twice:%v", req, err)
-				}
-			}
-		}
-		logger.Debug(logger.RespFormat, action, req, *resp)
-		d.SetPartial("load_balancer_name")
-		d.SetPartial("load_balancer_state")
-	}
-	d.Partial(false)
-	return resourceKsyunLbRead(d, m)
+	return resourceKsyunLbRead(d, meta)
 }
 
-func resourceKsyunLbDelete(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["LoadBalancerId"] = d.Id()
-	/*
-		_, err := slbconn.DeleteLoadBalancer(&req)
-		if err != nil {
-			return fmt.Errorf("release Slb error:%v", err)
-		}
-		return nil
-	*/
-	return resource.Retry(25*time.Minute, func() *resource.RetryError {
-		action := "DeleteLoadBalancer"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err1 := slbconn.DeleteLoadBalancer(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err1)
-		if err1 == nil || (err1 != nil && notFoundError(err1)) {
-			return nil
-		}
-		if err1 != nil && inUseError(err1) {
-			return resource.RetryableError(err1)
-		}
-		req := make(map[string]interface{})
-		req["LoadBalancerId.1"] = d.Id()
-		if pd, ok := d.GetOk("project_id"); ok {
-			req["ProjectId.1"] = fmt.Sprintf("%v", pd)
-		}
-		action = "DescribeLoadBalancers"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := slbconn.DescribeLoadBalancers(&req)
-		if err != nil {
-			return resource.NonRetryableError(fmt.Errorf("error on reading lb when deleting %q, %s", d.Id(), err))
-		}
-		logger.Debug(logger.RespFormat, action, req, *resp)
-
-		itemSet, ok := (*resp)["LoadBalancerDescriptions"]
-		if !ok {
-			return nil
-		}
-		items, ok := itemSet.([]interface{})
-		if !ok || len(items) == 0 {
-			return nil
-		}
-		return resource.RetryableError(fmt.Errorf(" the specified lb %q has not been deleted due to unknown error", d.Id()))
-	})
+func resourceKsyunLbDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.RemoveLoadBalancer(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting lb %q, %s", d.Id(), err)
+	}
+	return err
 }

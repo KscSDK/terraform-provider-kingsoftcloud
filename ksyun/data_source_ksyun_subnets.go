@@ -1,16 +1,32 @@
+/*
+This data source provides a list of Subnet resources according to their Subnet ID, name and the VPC they belong to.
+
+# Example Usage
+
+```hcl
+
+	data "ksyun_subnets" "default" {
+	  output_file="output_result"
+	  ids=[]
+	  vpc_id=[]
+	  nat_id=[]
+	  network_acl_id=[]
+	  subnet_type=[]
+	  availability_zone_name=[]
+	}
+
+```
+*/
 package ksyun
 
 import (
-	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
-	"regexp"
 )
 
 func dataSourceKsyunSubnets() *schema.Resource {
 	return &schema.Resource{
-		Read: dataSourceKsyunSubnetssRead,
-
+		Read: dataSourceKsyunSubnetsRead,
 		Schema: map[string]*schema.Schema{
 			"ids": {
 				Type:     schema.TypeSet,
@@ -18,13 +34,15 @@ func dataSourceKsyunSubnets() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of Subnet IDs, all the Subnet resources belong to this region will be retrieved if the ID is `\"\"`.",
 			},
 
 			"name_regex": {
 				Type:         schema.TypeString,
 				Optional:     true,
 				ValidateFunc: validation.ValidateRegexp,
+				Description:  "A regex string to filter results by subnet name.",
 			},
 
 			"vpc_ids": {
@@ -33,7 +51,38 @@ func dataSourceKsyunSubnets() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "The id of the VPC that the desired Subnet belongs to.",
+			},
+
+			"nat_ids": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+				Set:         schema.HashString,
+				Description: "The id of the NAT that the desired Subnet associated to.",
+			},
+
+			"network_acl_ids": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+				Set:         schema.HashString,
+				Description: "The id of the ACL that the desired Subnet associated to.",
+			},
+
+			"availability_zone_names": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+				Set:         schema.HashString,
+				Description: "The availability zone that the desired Subnet belongs to.",
 			},
 
 			"subnet_types": {
@@ -42,95 +91,134 @@ func dataSourceKsyunSubnets() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "one or more subnet types.",
 			},
 
 			"output_file": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "File name where to save data source results (after running `terraform plan`).",
 			},
 
 			"total_count": {
-				Type:     schema.TypeInt,
-				Computed: true,
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Total number of Subnet resources that satisfy the condition.",
 			},
 			"subnets": {
-				Type:     schema.TypeList,
-				Computed: true,
+				Type:        schema.TypeList,
+				Computed:    true,
+				Description: "An information list of subnets. Each element contains the following attributes:",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the subnet.",
+						},
+
+						"subnet_id": {
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the subnet.",
 						},
 
 						"name": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "Name of the subnet.",
 						},
 
 						"cidr_block": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The CIDR block assigned to the subnet.",
 						},
 
 						"vpc_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the VPC.",
 						},
 
 						"subnet_type": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "Type of the subnet.",
 						},
 
 						"dhcp_ip_from": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "DHCP start IP.",
 						},
 
 						"dhcp_ip_to": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "DHCP end IP.",
 						},
 
 						"gateway_ip": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The IP of gateway.",
 						},
 
 						"dns1": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The dns1 of the subnet.",
 						},
 
 						"dns2": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The dns2 of the subnet.",
 						},
 
 						"network_acl_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The id of the ACL that the desired Subnet associated to.",
 						},
 
 						"nat_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The id of the NAT that the desired Subnet associated to.",
 						},
 
 						"availability_zone_name": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "Availability zone.",
 						},
 
 						"create_time": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "creation time of the subnet.",
 						},
 						"availble_i_p_number": {
-							Type:     schema.TypeString,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "number of available IPs.",
+						},
+						"ipv6_cidr_block_association_set": {
+							Type:     schema.TypeList,
 							Computed: true,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"ipv6_cidr_block": {
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "the Ipv6 of this vpc bound.",
+									},
+								},
+							},
+							Description: "An Ipv6 association list of this vpc.",
 						},
 					},
 				},
@@ -139,114 +227,7 @@ func dataSourceKsyunSubnets() *schema.Resource {
 	}
 }
 
-func dataSourceKsyunSubnetssRead(d *schema.ResourceData, meta interface{}) error {
-	var result []map[string]interface{}
-	var allSubnets []interface{}
-
-	limit := 100
-	offset := 1
-
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-	readSubnet := make(map[string]interface{})
-	result = []map[string]interface{}{}
-	allSubnets = []interface{}{}
-
-	if ids, ok := d.GetOk("ids"); ok {
-		SchemaSetToInstanceMap(ids, "SubnetId", &readSubnet)
-	}
-	//filter
-	index := int(0)
-	if vpcIds, ok := d.GetOk("vpc_ids"); ok {
-		index = index + 1
-		SchemaSetToFilterMap(vpcIds, "vpc-id", index, &readSubnet)
-	}
-	if subnetTypes, ok := d.GetOk("subnet_types"); ok {
-		index = index + 1
-		SchemaSetToFilterMap(subnetTypes, "subnet-type", index, &readSubnet)
-	}
-
-	for {
-		readSubnet["MaxResults"] = limit
-		readSubnet["NextToken"] = offset
-
-		resp, err := conn.DescribeSubnets(&readSubnet)
-		if err != nil {
-			return fmt.Errorf("error on reading subnet list req(%v):%v", readSubnet, err)
-		}
-		l := (*resp)["SubnetSet"].([]interface{})
-		allSubnets = append(allSubnets, l...)
-		if len(l) < limit {
-			break
-		}
-
-		offset = offset + limit
-	}
-
-	if nameRegex, ok := d.GetOk("name_regex"); ok {
-		r := regexp.MustCompile(nameRegex.(string))
-		for _, v := range allSubnets {
-			item := v.(map[string]interface{})
-			if r != nil && !r.MatchString(item["SubnetName"].(string)) {
-				continue
-			}
-			result = append(result, item)
-		}
-	} else {
-		merageResultDirect(&result, allSubnets)
-	}
-
-	err := dataSourceKsyunSubnetsSave(d, result)
-	if err != nil {
-		return fmt.Errorf("error on reading subnet list, %s", err)
-	}
-	return nil
-}
-
-func dataSourceKsyunSubnetsSave(d *schema.ResourceData, result []map[string]interface{}) error {
-
-	var ids []string
-	var data []map[string]interface{}
-	var err error
-
-	ids = []string{}
-	data = []map[string]interface{}{}
-
-	for _, item := range result {
-		ids = append(ids, item["SubnetId"].(string))
-
-		data = append(data, map[string]interface{}{
-			"id":                     item["SubnetId"],
-			"name":                   item["SubnetName"],
-			"cidr_block":             item["CidrBlock"],
-			"vpc_id":                 item["VpcId"],
-			"subnet_type":            item["SubnetType"],
-			"dhcp_ip_from":           item["DhcpIpFrom"],
-			"dhcp_ip_to":             item["DhcpIpTo"],
-			"gateway_ip":             item["GatewayIp"],
-			"dns1":                   item["Dns1"],
-			"dns2":                   item["Dns2"],
-			"network_acl_id":         item["NetworkAclId"],
-			"nat_id":                 item["NatId"],
-			"availability_zone_name": item["AvailabilityZoneName"],
-			"create_time":            item["CreateTime"],
-		})
-	}
-	d.SetId(hashStringArray(ids))
-	err = d.Set("total_count", len(result))
-	if err != nil {
-		return err
-	}
-	err = d.Set("subnets", data)
-	if err != nil {
-		return err
-	}
-	if outputFile, ok := d.GetOk("output_file"); ok && outputFile.(string) != "" {
-		err = writeToFile(outputFile.(string), data)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+func dataSourceKsyunSubnetsRead(d *schema.ResourceData, meta interface{}) error {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	return vpcService.ReadAndSetSubnets(d, dataSourceKsyunSubnets())
 }

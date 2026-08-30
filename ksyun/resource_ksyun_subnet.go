@@ -1,11 +1,45 @@
+/*
+Provides a Subnet resource under VPC resource.
+
+# Example Usage
+
+```hcl
+
+	resource "ksyun_vpc" "example" {
+	  vpc_name   = "tf-example-vpc-01"
+	  cidr_block = "10.0.0.0/16"
+	}
+
+	resource "ksyun_subnet" "example" {
+	  subnet_name      = "tf-acc-subnet1"
+	  	cidr_block = "10.0.5.0/24"
+	      subnet_type = "Normal"
+	      dhcp_ip_from = "10.0.5.2"
+	      dhcp_ip_to = "10.0.5.253"
+	      vpc_id  = "${ksyun_vpc.test.id}"
+	      gateway_ip = "10.0.5.1"
+	      dns1 = "198.18.254.41"
+	      dns2 = "198.18.254.40"
+	      availability_zone = "cn-shanghai-2a"
+	}
+
+```
+
+# Import
+
+Subnet can be imported using the `id`, e.g.
+
+```
+$ terraform import ksyun_subnet.example fdeba8ca-8aa6-4cd0-8ffa-52ca9e9fef42
+```
+*/
 package ksyun
 
 import (
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"time"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
 
 func resourceKsyunSubnet() *schema.Resource {
@@ -19,55 +53,72 @@ func resourceKsyunSubnet() *schema.Resource {
 		},
 		Schema: map[string]*schema.Schema{
 			"availability_zone": {
-				Type:     schema.TypeString,
-				ForceNew: true,
-				Optional: true,
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Optional:    true,
+				Computed:    true,
+				Description: "The name of the availability zone.",
 			},
 			"subnet_name": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ForceNew:     false,
-				ValidateFunc: validateName,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "The name of the subnet.",
 			},
 
 			"cidr_block": {
 				Type:         schema.TypeString,
-				ForceNew:     true,
 				Required:     true,
+				ForceNew:     true,
 				ValidateFunc: validateCIDRNetworkAddress,
+				Description:  "The CIDR block assigned to the subnet.",
 			},
 
 			"subnet_type": {
-				Type:         schema.TypeString,
-				ForceNew:     true,
-				Required:     true,
-				ValidateFunc: validateSubnetType,
-			},
-
-			"dhcp_ip_to": {
-				Type:         schema.TypeString,
-				ForceNew:     true,
-				Required:     true,
-				ValidateFunc: validateIpAddress,
-			},
-
-			"dhcp_ip_from": {
-				Type:         schema.TypeString,
-				ForceNew:     true,
-				Required:     true,
-				ValidateFunc: validateIpAddress,
-			},
-
-			"vpc_id": {
 				Type:     schema.TypeString,
 				ForceNew: true,
 				Required: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"Reserve",
+					"Normal",
+					"Physical",
+				}, false),
+				Description: "The type of subnet. Valid Values:'Reserve', 'Normal', 'Physical'.",
+			},
+
+			// openapi已经不支持dhcp的参数，保留这两个值兼容老用户，实际不起作用
+			"dhcp_ip_to": {
+				Type:         schema.TypeString,
+				Deprecated:   "This attribute is deprecated and will be removed in a future version.",
+				Optional:     true,
+				ForceNew:     true,
+				Computed:     true,
+				ValidateFunc: validateIpAddress,
+				Description:  "DHCP end IP.",
+			},
+			"dhcp_ip_from": {
+				Type:         schema.TypeString,
+				Deprecated:   "This attribute is deprecated and will be removed in a future version.",
+				Optional:     true,
+				ForceNew:     true,
+				Computed:     true,
+				ValidateFunc: validateIpAddress,
+				Description:  "DHCP start IP.",
+			},
+
+			"vpc_id": {
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The id of the vpc.",
 			},
 
 			"gateway_ip": {
-				Type:     schema.TypeString,
-				ForceNew: true,
-				Optional: true,
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Optional:    true,
+				Computed:    true,
+				Description: "The IP of gateway.",
 			},
 
 			"dns1": {
@@ -75,6 +126,8 @@ func resourceKsyunSubnet() *schema.Resource {
 				ForceNew:     false,
 				Optional:     true,
 				ValidateFunc: validateIpAddress,
+				Computed:     true,
+				Description:  "The dns of the subnet.",
 			},
 
 			"dns2": {
@@ -82,179 +135,110 @@ func resourceKsyunSubnet() *schema.Resource {
 				ForceNew:     false,
 				Optional:     true,
 				ValidateFunc: validateIpAddress,
+				Computed:     true,
+				Description:  "The dns of the subnet.",
 			},
+			"provided_ipv6_cidr_block": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				ForceNew:    true,
+				Description: "whether support IPV6 CIDR blocks. <br> NOTES: providing a part of regions now.",
+			},
+
+			"visit_internet": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  true,
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					return d.Get("subnet_type").(string) != "Physical" || d.Id() != ""
+				},
+				Description: "Whether the subnet can access the Internet. Valid, when subnet_type = Physical.",
+			},
+
 			"network_acl_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The id of the ACL that the desired Subnet associated to.",
 			},
 
 			"nat_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The id of the NAT that the desired Subnet associated to.",
 			},
 
 			"availability_zone_name": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The name of the availability zone.",
 			},
 
 			"create_time": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "creation time of the subnet.",
 			},
 			"subnet_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "ID of the subnet.",
 			},
-			"availble_i_p_number": {
-				Type:     schema.TypeString,
+			"available_ip_number": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "number of available IPs.",
+			},
+			"ipv6_cidr_block_association_set": {
+				Type:     schema.TypeList,
 				Computed: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"ipv6_cidr_block": {
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "the Ipv6 of this subnet bound.",
+						},
+					},
+				},
+				Description: "An Ipv6 association list of this subnet.",
 			},
 		},
 	}
 }
 
-func resourceKsyunSubnetCreate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-
-	var resp *map[string]interface{}
-	var err error
-	creates := []string{
-		"availability_zone",
-		"subnet_name",
-		"cidr_block",
-		"subnet_type",
-		"dhcp_ip_from",
-		"dhcp_ip_to",
-		"gateway_ip",
-		"vpc_id",
-		"dns1",
-		"dns2",
-	}
-	createSubnet := make(map[string]interface{})
-	for _, v := range creates {
-		if v1, ok := d.GetOk(v); ok {
-			vv := Downline2Hump(v)
-			createSubnet[vv] = fmt.Sprintf("%v", v1)
-		}
-	}
-
-	if d.Get("subnet_type") != "Reserve" && (d.Get("gateway_ip") == nil || d.Get("gateway_ip") == "") {
-		return fmt.Errorf("subnet_type not Reserve,Must set gateway_ip")
-	}
-	action := "CreateSubnet"
-	logger.Debug(logger.ReqFormat, action, createSubnet)
-	resp, err = conn.CreateSubnet(&createSubnet)
-	logger.Debug(logger.AllFormat, action, createSubnet, *resp, err)
+func resourceKsyunSubnetCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.CreateSubnet(d, resourceKsyunSubnet())
 	if err != nil {
-		return fmt.Errorf("error on creating Subnet, %s", err)
-	}
-	if resp != nil {
-		Subnet := (*resp)["Subnet"].(map[string]interface{})
-		d.SetId(Subnet["SubnetId"].(string))
+		return fmt.Errorf("error on creating vpc %q, %s", d.Id(), err)
 	}
 	return resourceKsyunSubnetRead(d, meta)
 }
 
-func resourceKsyunSubnetRead(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-
-	readSubnet := make(map[string]interface{})
-	readSubnet["SubnetId.1"] = d.Id()
-	action := "DescribeSubnets"
-	logger.Debug(logger.ReqFormat, action, readSubnet)
-	resp, err := conn.DescribeSubnets(&readSubnet)
-	logger.Debug(logger.AllFormat, action, readSubnet, *resp, err)
+func resourceKsyunSubnetRead(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.ReadAndSetSubnet(d, resourceKsyunSubnet())
 	if err != nil {
-		return fmt.Errorf("error on reading Subnet %q, %s", d.Id(), err)
+		return fmt.Errorf("error on reading subnet %q, %s", d.Id(), err)
 	}
-	if resp != nil {
-		items, ok := (*resp)["SubnetSet"].([]interface{})
-		if !ok || len(items) == 0 {
-			d.SetId("")
-			return nil
-		}
-		SetDByResp(d, items[0], subnetKeys, map[string]bool{})
-	}
-	return nil
+	return err
 }
 
-func resourceKsyunSubnetUpdate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-	d.Partial(true)
-	attributeUpdate := false
-	modifySubnet := make(map[string]interface{})
-	modifySubnet["SubnetId"] = d.Id()
-
-	if d.HasChange("subnet_name") && !d.IsNewResource() {
-		modifySubnet["SubnetName"] = fmt.Sprintf("%v", d.Get("subnet_name"))
-		attributeUpdate = true
+func resourceKsyunSubnetUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.ModifySubnet(d, resourceKsyunSubnet())
+	if err != nil {
+		return fmt.Errorf("error on updating subnet %q, %s", d.Id(), err)
 	}
-	if d.HasChange("dns1") && !d.IsNewResource() {
-		modifySubnet["Dns1"] = fmt.Sprintf("%v", d.Get("dns1"))
-		attributeUpdate = true
-	}
-	if d.HasChange("dns2") && !d.IsNewResource() {
-		modifySubnet["Dns2"] = fmt.Sprintf("%v", d.Get("dns2").(string))
-		attributeUpdate = true
-	}
-	if attributeUpdate {
-		action := "ModifySubnet"
-		logger.Debug(logger.ReqFormat, action, modifySubnet)
-		resp, err := conn.ModifySubnet(&modifySubnet)
-		logger.Debug(logger.AllFormat, action, modifySubnet, *resp, err)
-		if err != nil {
-			return fmt.Errorf("error on updating Subnet, %s", err)
-		}
-		d.SetPartial("subnet_name")
-		d.SetPartial("dns1")
-		d.SetPartial("dns2")
-	}
-	d.Partial(false)
 	return resourceKsyunSubnetRead(d, meta)
 }
 
-func resourceKsyunSubnetDelete(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*KsyunClient)
-	conn := client.vpcconn
-	deleteSubnet := make(map[string]interface{})
-	deleteSubnet["SubnetId"] = d.Id()
-	action := "DeleteSubnet"
-
-	return resource.Retry(25*time.Minute, func() *resource.RetryError {
-		logger.Debug(logger.ReqFormat, action, deleteSubnet)
-		resp, err1 := conn.DeleteSubnet(&deleteSubnet)
-		logger.Debug(logger.AllFormat, action, deleteSubnet, *resp, err1)
-		if err1 == nil || (err1 != nil && notFoundError(err1)) {
-			return nil
-		}
-		if err1 != nil && inUseError(err1) {
-			return resource.RetryableError(err1)
-		}
-		readSubnet := make(map[string]interface{})
-		readSubnet["SubnetId.1"] = d.Id()
-		action = "DescribeSubnets"
-		logger.Debug(logger.ReqFormat, action, readSubnet)
-		resp, err := conn.DescribeSubnets(&readSubnet)
-		logger.Debug(logger.AllFormat, action, readSubnet, *resp, err)
-		if err != nil && notFoundError(err1) {
-			return nil
-		}
-		if err != nil {
-			return resource.NonRetryableError(fmt.Errorf("error on  reading SubnetS when delete %q, %s", d.Id(), err))
-		}
-		itemset, ok := (*resp)["SubnetSet"]
-		if !ok {
-			return nil
-		}
-		item, ok := itemset.([]interface{})
-		if !ok || len(item) == 0 {
-			return nil
-		}
-		return resource.RetryableError(fmt.Errorf("error on  deleting SubnetS %q, %s", d.Id(), err1))
-	})
-
+func resourceKsyunSubnetDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.RemoveSubnet(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting subnet %q, %s", d.Id(), err)
+	}
+	return err
 }

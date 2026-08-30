@@ -1,7 +1,20 @@
+/*
+This data source provides a list of Load Balancer Rule resources according to their Load Balancer Rule ID.
+
+# Example Usage
+
+```hcl
+
+	data "ksyun_lb_acls" "default" {
+	  output_file="output_result"
+	  ids=[]
+
+}
+```
+*/
 package ksyun
 
 import (
-	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 )
 
@@ -15,63 +28,77 @@ func dataSourceKsyunSlbAcls() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of LB Rule IDs, all the LB Rules belong to the Load Balancer listener will be retrieved if the ID is `\"\"`.",
 			},
 
 			"output_file": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "File name where to save data source results (after running `terraform plan`).",
 			},
 
 			"total_count": {
-				Type:     schema.TypeInt,
-				Computed: true,
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Total number of LB Rules that satisfy the condition.",
 			},
 			"lb_acls": {
-				Type:     schema.TypeList,
-				Computed: true,
+				Type:        schema.TypeList,
+				Computed:    true,
+				Description: "It is a nested type which documented below.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"create_time": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The time of creation for LB ACL.",
 						},
 						"load_balancer_acl_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the LB ACL.",
 						},
 						"load_balancer_acl_name": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "Name of the LB ACL.",
 						},
 						"load_balancer_acl_entry_set": {
-							Type:     schema.TypeList,
-							Computed: true,
+							Type:        schema.TypeList,
+							Computed:    true,
+							Description: "A list of ACL entries.",
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"load_balancer_acl_id": {
-										Type:     schema.TypeString,
-										Computed: true,
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "ID of the ACL.",
 									},
 									"load_balancer_acl_entry_id": {
-										Type:     schema.TypeString,
-										Computed: true,
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "ID of the ACL entry.",
 									},
 									"cidr_block": {
-										Type:     schema.TypeString,
-										Computed: true,
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "The information of Acl's cidr block.",
 									},
 									"rule_number": {
-										Type:     schema.TypeInt,
-										Computed: true,
+										Type:        schema.TypeInt,
+										Computed:    true,
+										Description: "rule priority.",
 									},
 									"rule_action": {
-										Type:     schema.TypeString,
-										Computed: true,
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "rule action, allow or deny.",
 									},
 									"protocol": {
-										Type:     schema.TypeString,
-										Computed: true,
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "rul protocol.",
 									},
 								},
 							},
@@ -82,76 +109,7 @@ func dataSourceKsyunSlbAcls() *schema.Resource {
 		},
 	}
 }
-func dataSourceKsyunSlbAclsRead(d *schema.ResourceData, m interface{}) error {
-	conn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	var slbAcls []string
-	if ids, ok := d.GetOk("ids"); ok {
-		slbAcls = SchemaSetToStringSlice(ids)
-	}
-	for k, v := range slbAcls {
-		if v == "" {
-			continue
-		}
-		req[fmt.Sprintf("LoadBalancerAclId.%d", k+1)] = v
-	}
-	var allSlbAcls []interface{}
-	var limit int = 100
-	var nextToken string
-	for {
-		req["MaxResults"] = limit
-		if nextToken != "" {
-			req["NextToken"] = nextToken
-		}
-		resp, err := conn.DescribeLoadBalancerAcls(&req)
-		if err != nil {
-			return fmt.Errorf("error on reading SlbAcl list, %s", req)
-		}
-
-		itemSet, ok := (*resp)["LoadBalancerAclSet"]
-		if !ok {
-			return fmt.Errorf("error on reading SlbAcl set")
-
-		}
-		//???????????????????????????
-		items, ok := itemSet.([]interface{})
-		if !ok {
-			break
-		}
-		if items == nil || len(items) < 1 {
-			break
-		}
-		allSlbAcls = append(allSlbAcls, items...)
-
-		if len(items) < limit {
-			break
-		}
-
-		if nextTokens, ok := (*resp)["NextToken"]; ok {
-			nextToken = fmt.Sprintf("%v", nextTokens)
-		} else {
-			break
-		}
-	}
-
-	datas := GetSubSliceDByRep(allSlbAcls, lbAclKeys)
-	dealSlbAclData(datas)
-	err := dataSourceKscSave(d, "lb_acls", slbAcls, datas)
-	if err != nil {
-		return fmt.Errorf("error on save SlbAcl list, %s", err)
-	}
-	return nil
-
-}
-
-func dealSlbAclData(datas []map[string]interface{}) {
-	for k, v := range datas {
-		for k1, v1 := range v {
-			switch k1 {
-			case "load_balancer_acl_entry_set":
-				vv := v1.([]interface{})
-				datas[k]["load_balancer_acl_entry_set"] = GetSubSliceDByRep(vv, lbAclEntryKeys)
-			}
-		}
-	}
+func dataSourceKsyunSlbAclsRead(d *schema.ResourceData, meta interface{}) error {
+	slbService := SlbService{meta.(*KsyunClient)}
+	return slbService.ReadAndSetLoadBalancerAcls(d, dataSourceKsyunSlbAcls())
 }

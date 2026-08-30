@@ -1,686 +1,468 @@
+/*
+Provides an RDS instance resource. A DB instance is an isolated database environment in the cloud. A DB instance can contain multiple user-created databases.
+
+# Example Usage
+
+```hcl
+
+# Create a RDS MySQL instance
+
+	provider "ksyun"{
+	  region = "cn-shanghai-3"
+	  access_key = ""
+	  secret_key = ""
+	}
+
+	variable "available_zone" {
+	  default = "cn-shanghai-3a"
+	}
+
+	resource "ksyun_vpc" "default" {
+	  vpc_name   = "ksyun-vpc-tf"
+	  cidr_block = "10.7.0.0/21"
+	}
+
+	resource "ksyun_subnet" "foo" {
+	  subnet_name      = "ksyun-subnet-tf"
+	  cidr_block = "10.7.0.0/21"
+	  subnet_type = "Reserve"
+	  dhcp_ip_from = "10.7.0.2"
+	  dhcp_ip_to = "10.7.0.253"
+	  vpc_id  = "${ksyun_vpc.default.id}"
+	  gateway_ip = "10.7.0.1"
+	  dns1 = "198.18.254.41"
+	  dns2 = "198.18.254.40"
+	  availability_zone = "${var.available_zone}"
+	}
+
+	resource "ksyun_krds_security_group" "krds_sec_group_14" {
+	  security_group_name = "terraform_security_group_14"
+	  security_group_description = "terraform-security-group-14"
+	  security_group_rule{
+	    security_group_rule_protocol = "182.133.0.0/16"
+	    security_group_rule_name = "asdf"
+	  }
+	  security_group_rule{
+	    security_group_rule_protocol = "182.134.0.0/16"
+	    security_group_rule_name = "asdf2"
+	  }
+	}
+
+	resource "ksyun_krds" "my_rds_xx"{
+	  db_instance_class= "db.ram.2|db.disk.21"
+	  db_instance_name = "houbin_terraform_1-n"
+	  db_instance_type = "HRDS"
+	  engine = "mysql"
+	  engine_version = "5.7"
+	  master_user_name = "admin"
+	  master_user_password = "123qweASD123"
+	  vpc_id = "${ksyun_vpc.default.id}"
+	  subnet_id = "${ksyun_subnet.foo.id}"
+	  bill_type = "DAY"
+	  security_group_id = "${ksyun_krds_security_group.krds_sec_group_14.id}"
+	  preferred_backup_time = "01:00-02:00"
+	  availability_zone_1 = "cn-shanghai-3a"
+	  availability_zone_2 = "cn-shanghai-3b"
+	  port=3306
+	}
+
+# Create a RDS MySQL instance with specific parameters
+
+	provider "ksyun"{
+	  region = "cn-shanghai-3"
+	  access_key = ""
+	  secret_key = ""
+	}
+
+	variable "available_zone" {
+	  default = "cn-shanghai-3a"
+	}
+
+	resource "ksyun_vpc" "default" {
+	  vpc_name   = "ksyun-vpc-tf"
+	  cidr_block = "10.7.0.0/21"
+	}
+
+	resource "ksyun_subnet" "foo" {
+	  subnet_name      = "ksyun-subnet-tf"
+	  cidr_block = "10.7.0.0/21"
+	  subnet_type = "Reserve"
+	  dhcp_ip_from = "10.7.0.2"
+	  dhcp_ip_to = "10.7.0.253"
+	  vpc_id  = "${ksyun_vpc.default.id}"
+	  gateway_ip = "10.7.0.1"
+	  dns1 = "198.18.254.41"
+	  dns2 = "198.18.254.40"
+	  availability_zone = "${var.available_zone}"
+	}
+
+	resource "ksyun_krds_security_group" "krds_sec_group_14" {
+	  output_file = "output_file"
+	  security_group_name = "terraform_security_group_14"
+	  security_group_description = "terraform-security-group-14"
+	  security_group_rule{
+	    security_group_rule_protocol = "182.133.0.0/16"
+	    security_group_rule_name = "asdf"
+	  }
+	  security_group_rule{
+	    security_group_rule_protocol = "182.134.0.0/16"
+	    security_group_rule_name = "asdf2"
+	  }
+	}
+
+	resource "ksyun_krds" "my_rds_xx"{
+	  output_file = "output_file"
+	  db_instance_class= "db.ram.2|db.disk.21"
+	  db_instance_name = "houbin_terraform_1-n"
+	  db_instance_type = "HRDS"
+	  engine = "mysql"
+	  engine_version = "5.7"
+	  master_user_name = "admin"
+	  master_user_password = "123qweASD123"
+	  vpc_id = "${ksyun_vpc.default.id}"
+	  subnet_id = "${ksyun_subnet.foo.id}"
+	  bill_type = "DAY"
+	  security_group_id = "${ksyun_krds_security_group.krds_sec_group_14.id}"
+	  preferred_backup_time = "01:00-02:00"
+	  parameters {
+	    name = "auto_increment_increment"
+	    value = "8"
+	  }
+
+	  parameters {
+	    name = "binlog_format"
+	    value = "ROW"
+	  }
+
+	  parameters {
+	    name = "delayed_insert_limit"
+	    value = "108"
+	  }
+	  parameters {
+	    name = "auto_increment_offset"
+	    value= "2"
+	  }
+	  availability_zone_1 = "cn-shanghai-3a"
+	  availability_zone_2 = "cn-shanghai-3b"
+	  instance_has_eip = true
+	}
+
+```
+
+# Import
+
+KRDS can be imported using the id, e.g.
+
+```
+$ terraform import ksyun_krds.default 67b91d3c-c363-4f57-b0cd-xxxxxxxxxxxx
+```
+*/
 package ksyun
 
 import (
 	"fmt"
-	"github.com/KscSDK/ksc-sdk-go/service/krds"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/hashcode"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"log"
-	"strconv"
 	"time"
+
+	"github.com/hashicorp/terraform-plugin-sdk/helper/hashcode"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
-
-var krdsTfField = []string{
-	"db_instance_identifier",
-	"db_instance_class",
-	"db_instance_name",
-	"db_instance_type",
-	"engine",
-	"engine_version",
-	"master_user_name",
-	"master_user_password",
-	"vpc_id",
-	"subnet_id",
-	"bill_type",
-	"duration",
-	"security_group_id",
-	"db_parameter_group_id",
-	"preferred_backup_time",
-	"availability_zone_1",
-	"availability_zone_2",
-	"project_id",
-	"port",
-	"vip",
-	"instance_has_eip",
-	"eip",
-	"eip_port",
-}
-
-var getInTheCar = map[string]bool{
-	"db_instance_identifier": true,
-	"instance_create_time":   true,
-	"port":                   true,
-	"db_parameter_group_id":  true,
-	"sub_order_id":           true,
-	"availability_zone_1":    true,
-	"availability_zone_2":    true,
-	"region":                 true,
-}
 
 func resourceKsyunKrds() *schema.Resource {
 
 	return &schema.Resource{
 		Create: resourceKsyunKrdsCreate,
-		Update: resourceKsyunMysqlUpdate,
-		Read:   resourceKsyunMysqlRead,
-		Delete: resourceKsyunMysqlDelete,
+		Update: resourceKsyunKrdsUpdate,
+		Read:   resourceKsyunKrdsRead,
+		Delete: resourceKsyunKrdsDelete,
 		Importer: &schema.ResourceImporter{
 			State: schema.ImportStatePassthrough,
 		},
+		CustomizeDiff: krdsInstanceCustomizeDiff(),
 		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(30 * time.Minute),
-			Update: schema.DefaultTimeout(30 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
+			Create: schema.DefaultTimeout(300 * time.Minute),
+			Update: schema.DefaultTimeout(300 * time.Minute),
+			Delete: schema.DefaultTimeout(300 * time.Minute),
 		},
 		Schema: map[string]*schema.Schema{
 			"db_instance_identifier": {
 				Computed:    true,
 				Type:        schema.TypeString,
-				Optional:    true,
-				Description: "source instance identifier",
+				Description: "instance ID.",
 			},
 			"db_instance_class": {
 				Type:     schema.TypeString,
 				Required: true,
-				Description: "this value regex db.ram.d{1,3}|db.disk.d{1,5} , " +
-					"db.ram is rds random access memory size, db.disk is disk size",
+				Description: "this value regex db.ram.d{1,9}|db.disk.d{1,9}, " +
+					"db.ram is rds random access memory size, db.disk is disk size.",
+				ValidateFunc: validDbInstanceClass(),
 			},
 			"db_instance_name": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "instance name.",
 			},
 			"db_instance_type": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "HRDS",
+				Description: "instance type, valid values: HRDS, TRDS, ERDS, SINGLERDS.",
+				ValidateFunc: validation.StringInSlice([]string{
+					"HRDS",
+					"TRDS",
+					"ERDS",
+					"SINGLERDS",
+				}, false),
 			},
 			"engine": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "engine is db type, only support mysql|percona",
+				Description: "engine is db type, only support mysql|percona.",
+				ForceNew:    true,
 			},
 			"engine_version": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "db engine version only support 5.5|5.6|5.7|8.0",
+				Description: "db engine version only support 5.5|5.6|5.7|8.0.",
 			},
 			"region": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "region code.",
 			},
 			"master_user_name": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "database primary account name.",
 			},
 			"master_user_password": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				Sensitive:   true,
+				Description: "master account password.",
 			},
 			"vpc_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "ID of th VPC.",
 			},
 			"subnet_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "ID of the subnet.",
 			},
 			"bill_type": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				Default:  "DAY",
+				ForceNew: true,
+				//				//ValidateFunc: validation.StringInSlice([]string{
+				//	"DAY",
+				//	"YEAR_MONTH",
+				// }, false),
+				Description: "bill type, valid values: DAY, YEAR_MONTH, HourlyInstantSettlement. Default is DAY.",
 			},
 			"duration": {
-				Type:     schema.TypeInt,
-				Required: false,
-				Optional: true,
+				Type:             schema.TypeInt,
+				Optional:         true,
+				Computed:         true,
+				DiffSuppressFunc: durationSchemaDiffSuppressFunc("bill_type", "YEAR_MONTH"),
+				Description:      "purchase duration in months.",
 			},
 			"security_group_id": {
 				Type:        schema.TypeString,
-				Required:    false,
 				Optional:    true,
-				Description: "proprietary security group id for krds",
+				Computed:    true,
+				Description: "proprietary security group id for krds.",
 			},
-			"db_parameter_group_id": {
+			"vip": {
 				Type:        schema.TypeString,
 				Optional:    true,
 				Computed:    true,
-				Description: "proprietary db parameter group id for mysql",
+				Description: "virtual IP.",
+			},
+
+			// 参数组不能手动指定
+			// 创建时如果有parameters，会创建一个临时的参数组，创建实例时传入，实例创建完毕删除
+			// ！！！如果有指定的需求，需要注意改动清理临时参数组的逻辑，避免误删
+			"db_parameter_group_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "ID of the parameter group.",
 			},
 			"preferred_backup_time": {
-				Type:     schema.TypeString,
-				Required: false,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "backup time.",
 			},
 			"availability_zone_1": {
-				Type:     schema.TypeString,
-				Required: false,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "zone 1.",
 			},
 			"availability_zone_2": {
-				Type:     schema.TypeString,
-				Required: false,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "zone 2.",
 			},
 			"project_id": {
-				Type:     schema.TypeInt,
-				Required: false,
-				Optional: true,
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				Description: "project ID.",
+			},
+			"db_parameter_template_id": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "the id of parameter template that for the krds being created.",
 			},
 			"parameters": {
 				Type: schema.TypeSet,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"name": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "name of the parameter.",
 						},
 						"value": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "value of the parameter.",
 						},
 					},
 				},
-				Set:      parameterToHash,
-				Optional: true,
-				Computed: true,
+				Set:         parameterToHash,
+				Optional:    true,
+				Computed:    true,
+				Description: "database parameters.",
 			},
 			"port": {
-				Type:     schema.TypeInt,
-				Required: false,
-				Optional: true,
-				Computed: true,
-			},
-			"sub_order_id": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				Description: "port number.",
 			},
 			"instance_create_time": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "instance create time.",
 			},
 			"instance_has_eip": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Computed: false,
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "attach eip for instance.",
 			},
 			"eip": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: false,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "EIP address.",
 			},
 			"eip_port": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				Computed: false,
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "EIP port.",
 			},
+			"force_restart": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "Set it to true to make some parameter efficient when modifying them. Default to false.",
+			},
+
+			"vcpus": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "The number of vCPUs for the DB instance. If not specified, defaults to half of the memory size.",
+			},
+			"tags": tagsSchema(),
 		},
 	}
 }
 
 func parameterToHash(v interface{}) int {
+	if v == nil {
+		return hashcode.String("")
+	}
 	m := v.(map[string]interface{})
 	return hashcode.String(m["name"].(string) + "|" + m["value"].(string))
 }
 
-func resourceKsyunKrdsCreate(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).krdsconn
-	var resp *map[string]interface{}
-	createReq := make(map[string]interface{})
-	var err error
-	creates := []string{
-		"DBInstanceClass",
-		"DBInstanceName",
-		"DBInstanceType",
-		"Engine",
-		"EngineVersion",
-		"MasterUserName",
-		"MasterUserPassword",
-		"VpcId",
-		"SubnetId",
-		"BillType",
-		"Duration",
-		"SecurityGroupId",
-		"PreferredBackupTime",
-		"AvailabilityZone.1",
-		"AvailabilityZone.2",
-		"ProjectId",
-		"Port",
-	}
-	for _, v := range creates {
-		if v1, ok := d.GetOk(Camel2Hungarian(v)); ok {
-			createReq[v] = fmt.Sprintf("%v", v1)
-		}
-	}
-	action := "CreateDBInstance"
-	logger.Debug(logger.RespFormat, action, createReq)
-	resp, err = conn.CreateDBInstance(&createReq)
-	logger.Debug(logger.AllFormat, action, createReq, *resp, err)
+func resourceKsyunKrdsCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	err = createKrdsInstance(d, meta, false)
 	if err != nil {
-		return fmt.Errorf("error on creating Instance(krds): %s", err)
+		return fmt.Errorf("error on creating instance , error is %e", err)
 	}
-
-	if resp != nil {
-		bodyData := (*resp)["Data"].(map[string]interface{})
-		krdsInstance := bodyData["DBInstance"].(map[string]interface{})
-		instanceId := krdsInstance["DBInstanceIdentifier"].(string)
-		logger.DebugInfo("~*~*~*~*~ DBInstanceIdentifier : %v", instanceId)
-		d.SetId(instanceId)
-	}
-	stateConf := &resource.StateChangeConf{
-		Pending:    []string{tCreatingStatus},
-		Target:     []string{tActiveStatus, tFailedStatus, tDeletedStatus, tStopedStatus},
-		Timeout:    d.Timeout(schema.TimeoutCreate),
-		Delay:      10 * time.Second,
-		MinTimeout: 10 * time.Second,
-		Refresh:    mysqlInstanceStateRefresh(conn, d.Id(), []string{tCreatingStatus}),
-	}
-	_, err = stateConf.WaitForState()
-	if err != nil {
-		return fmt.Errorf("error on creating Instance(krds): %s", err)
-	}
-
-	err = resourceKsyunMysqlRead(d, meta)
-	if err != nil {
-		return fmt.Errorf("error on ModifyDBParameterGroup Instance(krds): %s", err)
-	}
-
-	if d.Get("instance_has_eip") == true {
-		modifyInstanceEip(d, meta)
-	}
-	return modifyParameters(d, meta)
-}
-
-func modifyParameters(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).krdsconn
-	paramsReq := make(map[string]interface{})
-	paramsReq["DBParameterGroupId"] = d.Get("db_parameter_group_id").(string)
-	documented := d.Get("parameters").(*schema.Set).List()
-	if len(documented) > 0 {
-		for paramIndex, i := range documented {
-			num := paramIndex + 1
-			paramsReq["Parameters.Name."+strconv.Itoa(num)] = i.(map[string]interface{})["name"].(string)
-			paramsReq["Parameters.Value."+strconv.Itoa(num)] = i.(map[string]interface{})["value"].(string)
-		}
-		mdAction := "ModifyDBParameterGroup"
-		logger.Debug(logger.RespFormat, mdAction, paramsReq)
-		paramResp, err := conn.ModifyDBParameterGroup(&paramsReq)
-		logger.Debug(logger.AllFormat, mdAction, paramsReq, *paramResp, err)
-		return err
-	}
-	return nil
-}
-
-func modifyInstanceEip(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).krdsconn
-	_ = checkStatus(d, conn)
-	req := map[string]interface{}{
-		"DBInstanceIdentifier": d.Id(),
-	}
-
-	if d.Get("instance_has_eip") == true {
-		action := "AllocateDBInstanceEip"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.AllocateDBInstanceEip(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-
+	client := meta.(*KsyunClient)
+	if d.HasChange("tags") {
+		tagService := TagService{client}
+		tagCall, err := tagService.ReplaceResourcesTagsWithResourceCall(d, resourceKsyunKrds(), "krds", false, true)
 		if err != nil {
 			return err
 		}
-		d.SetPartial("eip")
-		d.SetPartial("eip_port")
-		return nil
-	} else {
-		action := "ReleaseDBInstanceEip"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.ReleaseDBInstanceEip(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-
-		if err != nil {
-			return err
+		if err = tagCall.RightNow(d, client, false); err != nil {
+			return fmt.Errorf("touching tags error: %s", err)
 		}
-		d.SetPartial("eip")
-		d.SetPartial("eip_port")
+	}
+	return resourceKsyunKrdsRead(d, meta)
+}
+
+func resourceKsyunKrdsRead(d *schema.ResourceData, meta interface{}) (err error) {
+	err = readAndSetKrdsInstance(d, meta, false)
+	if err != nil {
+		return fmt.Errorf("error on reading instance , error is %s", err)
+	}
+	if d.Id() == "" {
 		return nil
 	}
-}
-
-func mysqlInstanceStateRefresh(client *krds.Krds, instanceId string, target []string) resource.StateRefreshFunc {
-	return func() (interface{}, string, error) {
-		req := map[string]interface{}{"DBInstanceIdentifier": instanceId}
-		action := "DescribeDBInstances"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := client.DescribeDBInstances(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-		if err != nil {
-			return nil, "", err
-		}
-		bodyData := (*resp)["Data"].(map[string]interface{})
-		instances := bodyData["Instances"].([]interface{})
-		krdsInstance := instances[0].(map[string]interface{})
-		state := krdsInstance["DBInstanceStatus"].(string)
-
-		return resp, state, nil
-	}
-}
-
-func resourceKsyunMysqlRead(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).krdsconn
-	req := map[string]interface{}{"DBInstanceIdentifier": d.Id()}
-	action := "DescribeDBInstances"
-	logger.Debug(logger.ReqFormat, action, req)
-	resp, err := conn.DescribeDBInstances(&req)
-	logger.Debug(logger.AllFormat, action, req, *resp, err)
-
+	err = readAndSetKrdsInstanceParameters(d, meta)
 	if err != nil {
-		return fmt.Errorf("error on reading Instance(krds) %q, %s", d.Id(), err)
+		return fmt.Errorf("error on reading instance , error is %s", err)
 	}
-
-	bodyData, dataOk := (*resp)["Data"].(map[string]interface{})
-	if !dataOk {
-		return fmt.Errorf("error on reading Instance(krds) body %q, %+v", d.Id(), (*resp)["Error"])
-	}
-	instances := bodyData["Instances"].([]interface{})
-
-	krdsIds := make([]string, len(instances))
-	krdsMapList := make([]map[string]interface{}, len(instances))
-	for num, instance := range instances {
-		instanceInfo, _ := instance.(map[string]interface{})
-		krdsMap := make(map[string]interface{})
-		for k, v := range instanceInfo {
-			if k == "DBInstanceClass" {
-			} else if k == "ReadReplicaDBInstanceIdentifiers" {
-			} else if k == "DBSource" {
-			} else {
-				krdsMap[Camel2Hungarian(k)] = v
-			}
-			if k == "Eip" {
-				krdsMap["instance_has_eip"] = true
-			}
-		}
-		if krdsMap["instance_has_eip"] == nil {
-			krdsMap["instance_has_eip"] = false
-		}
-		logger.DebugInfo(" converted ---- %+v ", krdsMap)
-
-		krdsIds[num] = krdsMap["db_instance_identifier"].(string)
-		logger.DebugInfo("krdsIds fuck : %v", krdsIds)
-		krdsMapList[num] = krdsMap
-	}
-	logger.DebugInfo(" converted ---- %+v ", krdsMapList)
-	_ = SetDByFkResp(d, krdsMapList[0], getInTheCar)
-
-	return nil
+	return err
 }
 
-func resourceKsyunMysqlUpdate(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).krdsconn
-	// 允许部分属性被修改  d.Partial(true) d.Partial(false)
-	execModifyDBInstanceSpec := false
-	execModifyDBInstance := false
-	execModifyDBInstanceType := false
-	execUpgradeDBInstanceEngineVersion := false
-	execModifyDBBackupPolicy := false
-	execModifyParameters := false
-	execModifyDBInstanceAvailabilityZone := false
-	execModifyDBInstanceEip := false
-	d.Partial(true)
-	for _, v := range krdsTfField {
-		if d.HasChange(v) && !d.IsNewResource() {
-			if v == "engine" || v == "master_user_name" || v == "vpc_id" || v == "subnet_id" || v == "bill_type" || v == "duration" || v == "db_instance_identifier" || v == "project_id" || v == "db_parameter_group_id" {
-				return fmt.Errorf("error on updating instance , krds is not support update %s", v)
-			}
-			if v == "db_instance_class" {
-				execModifyDBInstanceSpec = true
-			}
-			if v == "db_instance_name" {
-				execModifyDBInstance = true
-			}
-			if v == "db_instance_type" {
-				execModifyDBInstanceType = true
-			}
-			if v == "engine_version" {
-				execUpgradeDBInstanceEngineVersion = true
-			}
-			if v == "master_user_password" {
-				execModifyDBInstance = true
-			}
-			if v == "security_group_id" {
-				execModifyDBInstance = true
-			}
-			if v == "preferred_backup_time" {
-				execModifyDBBackupPolicy = true
-			}
-			if v == "availability_zone_1" || v == "availability_zone_2" {
-				execModifyDBInstanceAvailabilityZone = true
-			}
-			if v == "instance_has_eip" {
-				execModifyDBInstanceEip = true
-			}
-
-			oldType, _ := d.GetChange("db_instance_type")
-			if "RR" == oldType {
-				if v == "availability_zone_1" || v == "availability_zone_2" || v == "preferred_backup_time" || v == "db_instance_type" {
-					return fmt.Errorf("error on updating instance , krds rr is not support update %s", v)
-				}
-			}
-		}
-	}
-	if d.HasChange("parameters") {
-		execModifyParameters = true
-	}
-	log.Printf(" if the response status code is 409, the instance is doing other things, " +
-		"please wait several minutes and retry")
-
-	if execModifyDBInstance {
-		req := map[string]interface{}{
-			"DBInstanceIdentifier": d.Id(),
-		}
-		if v, ok := d.GetOk("db_instance_name"); ok {
-			req["DBInstanceName"] = v
-		}
-		if v, ok := d.GetOk("master_user_password"); ok {
-			req["MasterUserPassword"] = v
-		}
-		if v, ok := d.GetOk("security_group_id"); ok {
-			req["SecurityGroupId"] = v
-		}
-		action := "ModifyDBInstance"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.ModifyDBInstance(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-		if err != nil {
-			return err
-		}
-		if d.HasChange("db_instance_name") {
-			d.SetPartial("db_instance_name")
-		}
-		if d.HasChange("master_user_password") {
-			d.SetPartial("master_user_password")
-		}
-		if d.HasChange("security_group_id") {
-			d.SetPartial("security_group_id")
-		}
-	}
-	if execModifyDBBackupPolicy {
-		req := map[string]interface{}{
-			"DBInstanceIdentifier": d.Id(),
-			"PreferredBackupTime":  d.Get("preferred_backup_time"),
-		}
-		action := "ModifyDBInstance"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.ModifyDBInstance(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-		if err != nil {
-			return err
-		}
-		d.SetPartial("preferred_backup_time")
-	}
-	if execModifyParameters {
-		err := modifyParameters(d, meta)
-		if err != nil {
-			return err
-		}
-		d.SetPartial("parameters")
-	}
-
-	if execModifyDBInstanceType {
-		_ = checkStatus(d, conn)
-
-		oldType, newType := d.GetChange("db_instance_type")
-		if "TRDS" == oldType && "HRDS" == newType {
-			req := map[string]interface{}{
-				"DBInstanceIdentifier": d.Id(),
-				"DBInstanceType":       d.Get("db_instance_type"),
-			}
-			action := "ModifyDBInstanceType"
-			logger.Debug(logger.ReqFormat, action, req)
-			resp, err := conn.ModifyDBInstanceType(&req)
-			logger.Debug(logger.AllFormat, action, req, *resp, err)
-			if err != nil {
-				return err
-			}
-			if d.HasChange("db_instance_type") {
-				d.SetPartial("db_instance_type")
-			}
-		} else {
-			return fmt.Errorf("error on updating instance , krds is not support %s to %s", oldType, newType)
-		}
-	}
-	if execModifyDBInstanceAvailabilityZone {
-		_ = checkStatus(d, conn)
-
-		req := map[string]interface{}{
-			"DBInstanceIdentifier": d.Id(),
-			"AvailabilityZone.1":   d.Get("availability_zone_1"),
-			"AvailabilityZone.2":   d.Get("availability_zone_2"),
-		}
-		action := "ModifyDBInstanceAvailabilityZone"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.ModifyDBInstanceAvailabilityZone(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-		if err != nil {
-			return err
-		}
-		if d.HasChange("availability_zone_1") {
-			d.SetPartial("availability_zone_1")
-		}
-		if d.HasChange("availability_zone_2") {
-			d.SetPartial("availability_zone_2")
-		}
-	}
-	if execUpgradeDBInstanceEngineVersion {
-		_ = checkStatus(d, conn)
-
-		req := map[string]interface{}{
-			"DBInstanceIdentifier": d.Id(),
-			"Engine":               d.Get("engine"),
-			"EngineVersion":        d.Get("engine_version"),
-		}
-		action := "UpgradeDBInstanceEngineVersion"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.UpgradeDBInstanceEngineVersion(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-		if err != nil {
-			return err
-		}
-		d.SetPartial("engine_version")
-	}
-
-	if execModifyDBInstanceSpec {
-		_ = checkStatus(d, conn)
-
-		req := map[string]interface{}{
-			"DBInstanceIdentifier": d.Id(),
-			"DBInstanceClass":      d.Get("db_instance_class"),
-		}
-		action := "ModifyDBInstanceSpec"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := conn.ModifyDBInstanceSpec(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err)
-
-		if err != nil {
-			return err
-		}
-		d.SetPartial("db_instance_class")
-	}
-	if execModifyDBInstanceEip {
-		modifyInstanceEip(d, meta)
-	}
-	d.Partial(false)
-
-	_ = checkStatus(d, conn)
-	return resourceKsyunMysqlRead(d, meta)
-}
-
-func checkStatus(d *schema.ResourceData, conn *krds.Krds) error {
-	stateConf := &resource.StateChangeConf{
-		Pending:    waitStatus,
-		Target:     finalStatus,
-		Timeout:    d.Timeout(schema.TimeoutUpdate),
-		Delay:      10 * time.Second,
-		MinTimeout: 10 * time.Second,
-		Refresh:    mysqlInstanceStateRefresh(conn, d.Id(), finalStatus),
-	}
-	_, err := stateConf.WaitForState()
-
-	//fmt.Println("checkResp is ", checkResp)
+func resourceKsyunKrdsUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	err = modifyKrdsInstance(d, meta, false)
 	if err != nil {
-		return fmt.Errorf("error on updating ModifyDBInstanceType , err = %s", err)
-	} else {
-		_, instFinalStatus, _ := mysqlInstanceStateRefresh(conn, d.Id(), finalStatus)()
-
-		if instFinalStatus != tActiveStatus {
-			return fmt.Errorf("error status : %s, ", instFinalStatus)
-		} else {
-			return nil
+		return fmt.Errorf("error on updating instance , error is %e", err)
+	}
+	err = checkKrdsInstanceState(d, meta, "", d.Timeout(schema.TimeoutUpdate))
+	if err != nil {
+		return fmt.Errorf("error on updating instance , error is %e", err)
+	}
+	client := meta.(*KsyunClient)
+	if d.HasChange("tags") {
+		tagService := TagService{client}
+		tagCall, err := tagService.ReplaceResourcesTagsWithResourceCall(d, resourceKsyunKrds(), "krds", false, true)
+		if err != nil {
+			return err
+		}
+		if err = tagCall.RightNow(d, client, false); err != nil {
+			return fmt.Errorf("touching tags error: %s", err)
 		}
 	}
+
+	err = resourceKsyunKrdsRead(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on updating instance , error is %e", err)
+	}
+	return err
 }
 
-func resourceKsyunMysqlDelete(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).krdsconn
-	deleteReq := make(map[string]interface{})
-	deleteReq["DBInstanceIdentifier"] = d.Id()
-
-	return resource.Retry(15*time.Minute, func() *resource.RetryError {
-		readReq := map[string]interface{}{"DBInstanceIdentifier": d.Id()}
-		discribeAction := "DescribeInstances"
-		logger.Debug(logger.ReqFormat, discribeAction, readReq)
-		desResp, desErr := conn.DescribeDBInstances(&readReq)
-		logger.Debug(logger.AllFormat, discribeAction, readReq, *desResp, desErr)
-
-		if desErr != nil {
-			if notFoundError(desErr) {
-				return nil
-			} else {
-				return resource.NonRetryableError(desErr)
-			}
-		}
-
-		bodyData := (*desResp)["Data"].(map[string]interface{})
-		instances := bodyData["Instances"].([]interface{})
-		sqlserverInstance := instances[0].(map[string]interface{})
-		state := sqlserverInstance["DBInstanceStatus"].(string)
-
-		if state != tDeletedStatus {
-			deleteAction := "DeleteDBInstance"
-			logger.Debug(logger.ReqFormat, deleteAction, deleteReq)
-			deleteResp, deleteErr := conn.DeleteDBInstance(&deleteReq)
-			logger.Debug(logger.AllFormat, deleteAction, deleteReq, *deleteResp, deleteErr)
-			if deleteErr == nil || notFoundError(deleteErr) {
-				return nil
-			}
-			if deleteErr != nil {
-				return resource.RetryableError(deleteErr)
-			}
-
-			logger.Debug(logger.ReqFormat, discribeAction, readReq)
-			postDesResp, postDesErr := conn.DescribeDBInstances(&readReq)
-			logger.Debug(logger.AllFormat, discribeAction, readReq, *postDesResp, postDesErr)
-
-			if desErr != nil {
-				if notFoundError(desErr) {
-					return nil
-				} else {
-					return resource.NonRetryableError(fmt.Errorf("error on  reading krds when delete %q, %s", d.Id(), desErr))
-				}
-			}
-		}
-
-		return resource.RetryableError(desErr)
-	})
+func resourceKsyunKrdsDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	err = removeKrdsInstance(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on deleting instance , error is %e", err)
+	}
+	return err
 }

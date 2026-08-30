@@ -101,14 +101,13 @@ var vpcNetworkInterfaceKeys = map[string]bool{
 }
 
 /*
-var subnetAvailableAddresseKeys = map[string]bool{
-	"AvailableIpAddress": true,
-}
-var subnetAllocatedIpAddressesKeys = map[string]bool{
-	"AvailableIpAddress": true,
-}
+	var subnetAvailableAddresseKeys = map[string]bool{
+		"AvailableIpAddress": true,
+	}
 
-
+	var subnetAllocatedIpAddressesKeys = map[string]bool{
+		"AvailableIpAddress": true,
+	}
 */
 var vpcKeys = map[string]bool{
 	"CidrBlock":  true,
@@ -139,6 +138,41 @@ var subnetKeys = map[string]bool{
 	"AvailbleIPNumber":     true,
 	"AvailabilityZoneName": true,
 }
+
+var routeKeys = map[string]SdkResponseData{
+	"VpcId":                {},
+	"DestinationCidrBlock": {},
+	"RouteType":            {},
+	"CreateTime":           {},
+	"NextHopSet":           {Next: routeNextHop},
+}
+
+var routeNextHop = map[string]SdkResponseData{
+	"GatewayId":   {},
+	"GatewayName": {},
+}
+
+var natKeys = map[string]SdkResponseData{
+	"ProjectId":       {},
+	"CreateTime":      {},
+	"VpcId":           {},
+	"NatName":         {},
+	"NatMode":         {},
+	"NatType":         {},
+	"BandWidth":       {},
+	"NatIpSet":        {Next: natIp},
+	"AssociateNatSet": {Next: associateNat},
+}
+
+var natIp = map[string]SdkResponseData{
+	"NatIp":   {},
+	"NatIpId": {},
+}
+
+var associateNat = map[string]SdkResponseData{
+	"SubnetId": {},
+}
+
 var vpcSecurityGroupKeys = map[string]bool{
 	"CreateTime":            true,
 	"VpcId":                 true,
@@ -158,6 +192,18 @@ var vpcSecurityGroupEntrySetKeys = map[string]bool{
 	"PortRangeFrom":        true,
 	"PortRangeTo":          true,
 }
+var vpcSecurityGroupEntryKeys = map[string]SdkResponseData{
+	"Description":          {},
+	"SecurityGroupEntryId": {},
+	"CidrBlock":            {},
+	"Direction":            {},
+	"Protocol":             {},
+	"IcmpType":             {},
+	"IcmpCode":             {},
+	"PortRangeFrom":        {},
+	"PortRangeTo":          {},
+}
+
 var instanceKeys = map[string]bool{
 	"InstanceId":            true,
 	"ProjectId":             true,
@@ -254,6 +300,7 @@ var imageKeys = map[string]bool{
 	"Ipv6Support":      true,
 	"IsModifyType":     true,
 	"IsCloudMarket":    true,
+	"RealImageId":      true,
 }
 var networkInterfaceKeys = map[string]bool{
 	"NetworkInterfaceId":   true,
@@ -314,85 +361,87 @@ var redisInstanceKeys = map[string]bool{
 	"readonlyNode":     true,
 	//"rules":            true,
 	"parameters": true,
+	"shardSize":  true,
+	"shardNum":   true,
+	"eip":        true,
+	"eipRo":      true,
 }
 
 /*
-var epcInstanceKeys = map[string]bool{
-	"CreateTime":                   true,
-	"HostName":                     true,
-	"HostType":                     true,
-	"AllowModifyHyperThreading":    true,
-	"ReleasableTime":               true,
-	"TorName":                      true,
-	"CabinetName":                  true,
-	"RackName":                     true,
-	"HostId":                       true,
-	"Sn":                           true,
-	"CabinetId":                    true,
-	"AvailabilityZone":             true,
-	"Raid":                         true,
-	"ImageId":                      true,
-	"KeyId":                        true,
-	"NetworkInterfaceMode":         true,
-	"EnableBond":                   true,
-	"SecurityAgent":                true,
-	"CloudMonitorAgent":            true,
-	"ProductType":                  true,
-	"OsName":                       true,
-	"Memory":                       true,
-	"HostStatus":                   true,
-	"ClusterId":                    true,
-	"EnableContainer":              true,
-	"SystemFileType":               true,
-	"DataFileType":                 true,
-	"DataDiskCatalogue":            true,
-	"DataDiskCatalogueSuffix":      true,
-	"Cpu":                          true,
-	"Gpu":                          true,
-	"DiskSet":                      true,
-	"NetworkInterfaceAttributeSet": true,
-}
+	var epcInstanceKeys = map[string]bool{
+		"CreateTime":                   true,
+		"HostName":                     true,
+		"HostType":                     true,
+		"AllowModifyHyperThreading":    true,
+		"ReleasableTime":               true,
+		"TorName":                      true,
+		"CabinetName":                  true,
+		"RackName":                     true,
+		"HostId":                       true,
+		"Sn":                           true,
+		"CabinetId":                    true,
+		"AvailabilityZone":             true,
+		"Raid":                         true,
+		"ImageId":                      true,
+		"KeyId":                        true,
+		"NetworkInterfaceMode":         true,
+		"EnableBond":                   true,
+		"SecurityAgent":                true,
+		"CloudMonitorAgent":            true,
+		"ProductType":                  true,
+		"OsName":                       true,
+		"Memory":                       true,
+		"HostStatus":                   true,
+		"ClusterId":                    true,
+		"EnableContainer":              true,
+		"SystemFileType":               true,
+		"DataFileType":                 true,
+		"DataDiskCatalogue":            true,
+		"DataDiskCatalogueSuffix":      true,
+		"Cpu":                          true,
+		"Gpu":                          true,
+		"DiskSet":                      true,
+		"NetworkInterfaceAttributeSet": true,
+	}
 
-var epcNetworkInterfaceKeys = map[string]bool{
-	"NetworkInterfaceId":   true,
-	"NetworkInterfaceType": true,
-	"SubnetId":             true,
-	"PrivateIpAddress":     true,
-	"DNS1":                 true,
-	"DNS2":                 true,
-	"Mac":                  true,
-	"SecurityGroupSet":     true,
-}
+	var epcNetworkInterfaceKeys = map[string]bool{
+		"NetworkInterfaceId":   true,
+		"NetworkInterfaceType": true,
+		"SubnetId":             true,
+		"PrivateIpAddress":     true,
+		"DNS1":                 true,
+		"DNS2":                 true,
+		"Mac":                  true,
+		"SecurityGroupSet":     true,
+	}
 
-var epcDiskSetKeys = map[string]bool{
-	"DiskType":        true,
-	"Raid":            true,
-	"Space":           true,
-	"SystemDiskSpace": true,
-	"DiskAttribute":   true,
-	"DiskCount":       true,
-}
+	var epcDiskSetKeys = map[string]bool{
+		"DiskType":        true,
+		"Raid":            true,
+		"Space":           true,
+		"SystemDiskSpace": true,
+		"DiskAttribute":   true,
+		"DiskCount":       true,
+	}
 
-var epcCpuKeys = map[string]bool{
-	"Model":     true,
-	"Frequence": true,
-	"Count":     true,
-	"CoreCount": true,
-}
+	var epcCpuKeys = map[string]bool{
+		"Model":     true,
+		"Frequence": true,
+		"Count":     true,
+		"CoreCount": true,
+	}
 
-var epcGpuKeys = map[string]bool{
-	"Model":     true,
-	"Frequence": true,
-	"Count":     true,
-	"CoreCount": true,
-	"GpuCount":  true,
-}
+	var epcGpuKeys = map[string]bool{
+		"Model":     true,
+		"Frequence": true,
+		"Count":     true,
+		"CoreCount": true,
+		"GpuCount":  true,
+	}
 
-var epcSecurityGroupKeys = map[string]bool{
-	"SecurityGroupId": true,
-}
-
-
+	var epcSecurityGroupKeys = map[string]bool{
+		"SecurityGroupId": true,
+	}
 */
 var volumeKeys = map[string]bool{
 	"VolumeId":         true,
@@ -518,4 +567,37 @@ var redisSecKeys = map[string]bool{
 	"description":     true,
 	"created":         true,
 	"updated":         true,
+}
+
+var rabbitmqInstanceKeys = map[string]bool{
+	"UserId":           true,
+	"Region":           true,
+	"InstanceName":     true,
+	"InstanceId":       true,
+	"Status":           true,
+	"StatusName":       true,
+	"Vip":              true,
+	"WebVip":           true,
+	"InstanceType":     true,
+	"SsdDisk":          true,
+	"Protocol":         true,
+	"SecurityGroupId":  true,
+	"Port":             true,
+	"NetworkType":      true,
+	"VpcId":            true,
+	"SubnetId":         true,
+	"ProductId":        true,
+	"BillType":         true,
+	"CreateDate":       true,
+	"ExpirationDate":   true,
+	"ProjectId":        true,
+	"ProjectName":      true,
+	"NodeNum":          true,
+	"AvailabilityZone": true,
+	"ProductWhat":      true,
+	"Mode":             true,
+	"ModeName":         true,
+	"Eip":              true,
+	"WebEip":           true,
+	"EipEgress":        true,
 }

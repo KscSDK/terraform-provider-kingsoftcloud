@@ -1,10 +1,21 @@
+/*
+This data source provides a list of SSH Key resources according to their SSH Key ID.
+
+# Example Usage
+
+```hcl
+
+	data "ksyun_ssh_keys" "default" {
+	  output_file="output_result"
+	}
+
+```
+*/
 package ksyun
 
 import (
-	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
 )
 
 func dataSourceKsyunSSHKeys() *schema.Resource {
@@ -17,47 +28,68 @@ func dataSourceKsyunSSHKeys() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of SSH Key IDs, all the SSH Key belong to this region will be retrieved if the ID is `\"\"`.",
 			},
 			"name_regex": {
 				Type:         schema.TypeString,
 				Optional:     true,
 				ValidateFunc: validation.ValidateRegexp,
+				Description:  "A regex string to filter results by kay name.",
 			},
 			"output_file": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "File name where to save data source results (after running `terraform plan`).",
 			},
 
 			"total_count": {
-				Type:     schema.TypeInt,
-				Computed: true,
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Total number of keys that satisfy the condition.",
 			},
 			"key_name": {
-				Type:     schema.TypeString,
+				Type:          schema.TypeString,
+				Optional:      true,
+				ConflictsWith: []string{"key_names"},
+				Description:   "ssh key name.",
+			},
+			"key_names": {
+				Type:     schema.TypeSet,
 				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+				Set:           schema.HashString,
+				ConflictsWith: []string{"key_name"},
+				Description:   "a list of ssh key name.",
 			},
 
 			"keys": {
-				Type:     schema.TypeList,
-				Computed: true,
+				Type:        schema.TypeList,
+				Computed:    true,
+				Description: "An information list of ssh key. Each element contains the following attributes:",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"key_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the key.",
 						},
 						"key_name": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "name of the key.",
 						},
 						"public_key": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "public key.",
 						},
 						"create_time": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "creation time of the key.",
 						},
 					},
 				},
@@ -66,63 +98,7 @@ func dataSourceKsyunSSHKeys() *schema.Resource {
 	}
 }
 
-func dataSourceKsyunSSHKeysRead(d *schema.ResourceData, m interface{}) error {
-	conn := m.(*KsyunClient).sksconn
-	var sSHKeys []string
-	req := make(map[string]interface{})
-
-	if ids, ok := d.GetOk("ids"); ok {
-		sSHKeys = SchemaSetToStringSlice(ids)
-	}
-	for k, v := range sSHKeys {
-		if v == "" {
-			continue
-		}
-		req[fmt.Sprintf("SSHKeyId.%d", k+1)] = v
-	}
-	if name, ok := d.GetOk("key_name"); ok {
-		req["Filter.1.Name"] = "key-name"
-		req["Filter.1.Value.1"] = fmt.Sprintf("%v", name)
-	}
-	var alls []interface{}
-	var limit int = 30
-	var nextToken string
-	for {
-		req["MaxResults"] = fmt.Sprintf("%v", limit)
-		if !(nextToken == "" || nextToken == "null") {
-			req["NextToken"] = nextToken
-		}
-
-		resp, err := conn.DescribeKeys(&req)
-		if err != nil {
-			return fmt.Errorf("error on reading SSHKey list req(%v):%v", req, err)
-		}
-		logger.Debug(logger.RespFormat, "DescribeKeys", req, *resp)
-		itemSet, ok := (*resp)["KeySet"]
-		if !ok {
-			break
-		}
-		items, ok := itemSet.([]interface{})
-		if !ok {
-			break
-		}
-		if items == nil || len(items) < 1 {
-			break
-		}
-		alls = append(alls, items...)
-		if nextTokens, ok := (*resp)["NextToken"]; ok {
-			if nextTokens == "null" || nextTokens == "" || nextTokens == nil {
-				break
-			}
-			nextToken = fmt.Sprintf("%v", nextTokens)
-		} else {
-			break
-		}
-	}
-	datas := GetSubSliceDByRep(alls, sshKeyKeys)
-	err := dataSourceKscSave(d, "keys", sSHKeys, datas)
-	if err != nil {
-		return fmt.Errorf("error on save SSHKey list, %s", err)
-	}
-	return nil
+func dataSourceKsyunSSHKeysRead(d *schema.ResourceData, meta interface{}) error {
+	sksService := SksService{meta.(*KsyunClient)}
+	return sksService.ReadAndSetKeys(d, dataSourceKsyunSSHKeys())
 }

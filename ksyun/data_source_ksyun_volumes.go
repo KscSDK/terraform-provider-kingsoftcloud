@@ -1,10 +1,26 @@
+/*
+This data source provides a list of EBS volumes.
+
+# Example Usage
+
+```hcl
+
+	data "ksyun_volumes" "default" {
+	  output_file="output_result"
+	  ids=[]
+	  volume_category=""
+	  volume_status=""
+	  volume_type=""
+	  availability_zone=""
+	}
+
+```
+*/
+
 package ksyun
 
 import (
-	"fmt"
-
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
 )
 
 func dataSourceKsyunVolumes() *schema.Resource {
@@ -12,12 +28,14 @@ func dataSourceKsyunVolumes() *schema.Resource {
 		Read: dataSourceKsyunVolumesRead,
 		Schema: map[string]*schema.Schema{
 			"output_file": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "File name where to save data source results (after running `terraform plan`).",
 			},
 			"total_count": {
-				Type:     schema.TypeInt,
-				Computed: true,
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Total number of EBS volumes that satisfy the condition.",
 			},
 			"ids": {
 				Type:     schema.TypeSet,
@@ -25,73 +43,95 @@ func dataSourceKsyunVolumes() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set:      schema.HashString,
-				MaxItems: 100,
+				Set:         schema.HashString,
+				MaxItems:    100,
+				Description: "A list of EBS IDs, all the EBS resources belong to this region will be retrieved if the ID is `\"\"`.",
 			},
 			"volume_category": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The category to which the EBS volume belongs.",
 			},
 			"volume_status": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The status of the EBS volume.",
+			},
+			"volume_create_date": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The time when the EBS volume was created.",
 			},
 			"volume_type": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The type of the EBS volume.",
 			},
 			"availability_zone": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The availability zone in which the EBS volume resides.",
 			},
 			"volumes": {
-				Type:     schema.TypeList,
-				Computed: true,
+				Type:        schema.TypeList,
+				Computed:    true,
+				Description: "An information list of EBS volumes. Each element contains the following attributes:",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"volume_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The ID of the EBS volume.",
 						},
 						"volume_name": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The name of the EBS volume.",
 						},
 						"volume_desc": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The description of the EBS volume.",
 						},
 						"size": {
-							Type:     schema.TypeInt,
-							Computed: true,
+							Type:        schema.TypeInt,
+							Computed:    true,
+							Description: "The capacity of the EBS volume.",
 						},
 						"volume_status": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The status of the EBS volume.",
 						},
 						"volume_type": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The type of the EBS volume.",
 						},
 						"volume_category": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The category of the EBS volume.",
 						},
 						"instance_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The ID of the KEC instance to which the EBS volume is to be attached.",
 						},
 						"create_time": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The time when the EBS volume was created.",
 						},
 						"availability_zone": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The availability zone in which the EBS volume resides.",
 						},
 						"project_id": {
-							Type:     schema.TypeInt,
-							Computed: true,
+							Type:        schema.TypeInt,
+							Computed:    true,
+							Description: "The ID of the project.",
 						},
 					},
 				},
@@ -101,54 +141,6 @@ func dataSourceKsyunVolumes() *schema.Resource {
 }
 
 func dataSourceKsyunVolumesRead(d *schema.ResourceData, meta interface{}) error {
-	action := "DescribeVolumes"
-	conn := meta.(*KsyunClient).ebsconn
-	readReq := make(map[string]interface{})
-	var volumes []string
-	if ids, ok := d.GetOk("ids"); ok {
-		volumes = SchemaSetToStringSlice(ids)
-	}
-	for k, v := range volumes {
-		if v == "" {
-			continue
-		}
-		readReq[fmt.Sprintf("VolumeId.%d", k+1)] = v
-	}
-	if v, ok := d.GetOk("volume_category"); ok {
-		readReq["VolumeCategory"] = v
-	}
-	if v, ok := d.GetOk("volume_status"); ok {
-		readReq["VolumeStatus"] = v
-	}
-	if v, ok := d.GetOk("volume_type"); ok {
-		readReq["VolumeType"] = v
-	}
-	if v, ok := d.GetOk("availability_zone"); ok {
-		readReq["AvailabilityZone"] = v
-	}
-	logger.Debug(logger.ReqFormat, action, readReq)
-	resp, err := conn.DescribeVolumes(&readReq)
-	if err != nil {
-		return fmt.Errorf("error on reading volume list req(%v):%s", readReq, err)
-	}
-	logger.Debug(logger.RespFormat, action, readReq, *resp)
-	volumeList, ok := (*resp)["Volumes"]
-	if !ok {
-		return nil
-	}
-	items, ok := volumeList.([]interface{})
-	if !ok {
-		return nil
-	}
-	if items == nil || len(items) < 1 {
-		return nil
-	}
-	var allVolumes []interface{}
-	allVolumes = append(allVolumes, items...)
-	datas := GetSubSliceDByRep(allVolumes, volumeKeys)
-	err = dataSourceKscSave(d, "volumes", volumes, datas)
-	if err != nil {
-		return fmt.Errorf("error on save volume list, %s", err)
-	}
-	return nil
+	ebsService := EbsService{meta.(*KsyunClient)}
+	return ebsService.ReadAndSetVolumes(d, dataSourceKsyunVolumes())
 }

@@ -1,7 +1,28 @@
+/*
+This data source provides a list of EIP resources (Elastic IP address) according to their EIP ID.
+
+# Example Usage
+
+```hcl
+
+	data "ksyun_eips" "default" {
+	  output_file="output_result"
+
+	  ids=[]
+	  project_id=[]
+	  instance_type=[]
+	  network_interface_id=[]
+	  internet_gateway_id=[]
+	  band_width_share_id=[]
+	  line_id=[]
+	  public_ip=[]
+	}
+
+```
+*/
 package ksyun
 
 import (
-	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
@@ -16,12 +37,8 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
-			},
-			"name_regex": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.ValidateRegexp,
+				Set:         schema.HashString,
+				Description: "A list of Elastic IP IDs, all the EIPs belong to this region will be retrieved if the ID is `\"\"`.",
 			},
 			"project_id": {
 				Type:     schema.TypeSet,
@@ -29,17 +46,20 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "One or more project IDs.",
 			},
 
 			"output_file": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "File name where to save data source results (after running `terraform plan`).",
 			},
 
 			"total_count": {
-				Type:     schema.TypeInt,
-				Computed: true,
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Total number of Elastic IPs that satisfy the condition.",
 			},
 			"network_interface_id": {
 				Type:     schema.TypeSet,
@@ -47,15 +67,8 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
-			},
-			"instance_type": {
-				Type:     schema.TypeSet,
-				Optional: true,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of NetworkInterface IDs.",
 			},
 			"internet_gateway_id": {
 				Type:     schema.TypeSet,
@@ -63,7 +76,17 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of InternetGateway IDs.",
+			},
+			"instance_type": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+				Set:         schema.HashString,
+				Description: "A list of Instance Type.",
 			},
 			"band_width_share_id": {
 				Type:     schema.TypeSet,
@@ -71,7 +94,8 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of BandWidthShare IDs.",
 			},
 			"line_id": {
 				Type:     schema.TypeSet,
@@ -79,7 +103,8 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of Line IDs.",
 			},
 			"public_ip": {
 				Type:     schema.TypeSet,
@@ -87,72 +112,98 @@ func dataSourceKsyunEips() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
-				Set: schema.HashString,
+				Set:         schema.HashString,
+				Description: "A list of EIP address.",
+			},
+			"ip_version": {
+				Type:     schema.TypeString,
+				Optional: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"ipv4",
+					"ipv6",
+					"all",
+				}, false),
+				Description: "IP Version.",
 			},
 			"eips": {
-				Type:     schema.TypeList,
-				Computed: true,
+				Type:        schema.TypeList,
+				Computed:    true,
+				Description: "An information list of EIP. Each element contains the following attributes:",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"ip_version": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "IP Version.",
 						},
 						"internet_gateway_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "InternetGateway ID.",
 						},
 						"network_interface_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "NetworkInterface ID.",
+						},
+						"id": {
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the EIP.",
 						},
 						"allocation_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "ID of the EIP.",
 						},
 						"project_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "project ID.",
 						},
 						"line_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "Line ID.",
 						},
 						"band_width": {
-							Type:     schema.TypeInt,
-							Computed: true,
+							Type:        schema.TypeInt,
+							Computed:    true,
+							Description: "bandwidth of the EIP.",
 						},
 
 						"instance_id": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The instance id to bind with the EIP.",
 						},
 						"state": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "state of the EIP.",
 						},
 
 						"instance_type": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "The instance type to bind with the EIP.",
 						},
 
 						"public_ip": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "EIP address.",
 						},
 
 						"create_time": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "creation time of the EIP.",
 						},
 						"band_width_share_id": {
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-						"is_band_width_share": {
-							Type:     schema.TypeString,
-							Computed: true,
+							Type:        schema.TypeString,
+							Computed:    true,
+							Description: "the ID of the BWS which the EIP associated.",
 						},
 					},
 				},
@@ -161,82 +212,7 @@ func dataSourceKsyunEips() *schema.Resource {
 	}
 }
 
-func dataSourceKsyunEipsRead(d *schema.ResourceData, m interface{}) error {
-	conn := m.(*KsyunClient).eipconn
-	var eips []string
-	req := make(map[string]interface{})
-
-	if ids, ok := d.GetOk("ids"); ok {
-		eips = SchemaSetToStringSlice(ids)
-	}
-	for k, v := range eips {
-		if v == "" {
-			continue
-		}
-		req[fmt.Sprintf("AllocationId.%d", k+1)] = v
-	}
-	var projectIds []string
-	if ids, ok := d.GetOk("project_id"); ok {
-		projectIds = SchemaSetToStringSlice(ids)
-	}
-
-	for k, v := range projectIds {
-		if v == "" {
-			continue
-		}
-		req[fmt.Sprintf("ProjectId.%d", k+1)] = v
-	}
-
-	filters := []string{
-		"network_interface_id",
-		"instance_type",
-		"internet_gateway_id",
-		"band_width_share_id",
-		"line_id",
-		"public_ip",
-		"project_id",
-	}
-	req = *SchemaSetsToFilterMap(d, filters, &req)
-
-	var allEips []interface{}
-	var limit int = 100
-	var nextToken string
-	for {
-		req["MaxResults"] = limit
-		if nextToken != "" {
-			req["NextToken"] = nextToken
-		}
-		resp, err := conn.DescribeAddresses(&req)
-		if err != nil {
-			return fmt.Errorf("error on reading eip list req(%v):%v", req, err)
-		}
-		itemSet, ok := (*resp)["AddressesSet"]
-		if !ok {
-			//return fmt.Errorf("error on reading eip set")
-			break
-		}
-		items, ok := itemSet.([]interface{})
-		if !ok {
-			break
-		}
-		if items == nil || len(items) < 1 {
-			break
-		}
-		allEips = append(allEips, items...)
-
-		if len(items) < limit {
-			break
-		}
-		if nextTokens, ok := (*resp)["NextToken"]; ok {
-			nextToken = fmt.Sprintf("%v", nextTokens)
-		} else {
-			break
-		}
-	}
-	datas := GetSubSliceDByRep(allEips, eipKeys)
-	err := dataSourceKscSave(d, "eips", eips, datas)
-	if err != nil {
-		return fmt.Errorf("error on save eip list, %s", err)
-	}
-	return nil
+func dataSourceKsyunEipsRead(d *schema.ResourceData, meta interface{}) error {
+	eipService := EipService{meta.(*KsyunClient)}
+	return eipService.ReadAndSetAddresses(d, dataSourceKsyunEips())
 }

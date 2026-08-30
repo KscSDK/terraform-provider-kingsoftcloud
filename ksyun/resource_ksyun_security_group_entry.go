@@ -1,234 +1,160 @@
+/*
+Provides a Security Group Entry resource.
+
+# Example Usage
+
+```hcl
+
+	resource "ksyun_security_group_entry" "default" {
+	  security_group_id="7385c8ea-79f7-4e9c-b99f-517fc3726256"
+	  cidr_block="10.0.0.1/32"
+	  direction="in"
+	  protocol="ip"
+	}
+
+```
+
+# Import
+
+Security Group Entry can be imported using the `id`, e.g.
+
+```
+$ terraform import ksyun_security_group_entry.example xxxxxxxx-abc123456
+```
+*/
 package ksyun
 
 import (
 	"fmt"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"strings"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
 
 func resourceKsyunSecurityGroupEntry() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceKsyunSecurityGroupEntryCreate,
 		Read:   resourceKsyunSecurityGroupEntryRead,
+		Update: resourceKsyunSecurityGroupEntryUpdate,
 		Delete: resourceKsyunSecurityGroupEntryDelete,
+		Importer: &schema.ResourceImporter{
+			State: importSecurityGroupEntry,
+		},
 		Schema: map[string]*schema.Schema{
 			"description": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "The description of the entry.",
 			},
 			"security_group_id": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "The ID of the security group.",
 			},
 			"cidr_block": {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
+				ValidateFunc: validation.Any(
+					validation.StringIsEmpty,
+					validation.IsCIDR,
+				),
+				Description: "The cidr block of security group rule.",
 			},
 			"direction": {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"in",
+					"out",
+				}, false),
+				Description: "The direction of the entry, valid values:'in', 'out'.",
 			},
 			"protocol": {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"ip",
+					"tcp",
+					"udp",
+					"icmp",
+				}, false),
+				Description: "The protocol of the entry, valid values: 'ip', 'tcp', 'udp', 'icmp'.",
 			},
 			"icmp_type": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				//Computed: true,
-				ForceNew: true,
-				Default:  -2,
+				Type:             schema.TypeInt,
+				Optional:         true,
+				ForceNew:         true,
+				DiffSuppressFunc: securityGroupEntryDiffSuppressFunc,
+				Description:      "ICMP type.The required if protocol type is 'icmp'.",
 			},
 			"icmp_code": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				//Computed: true,
-				ForceNew: true,
-				Default:  -2,
+				Type:             schema.TypeInt,
+				Optional:         true,
+				ForceNew:         true,
+				DiffSuppressFunc: securityGroupEntryDiffSuppressFunc,
+				Description:      "ICMP code.The required if protocol type is 'icmp'.",
 			},
 			"port_range_from": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:             schema.TypeInt,
+				Optional:         true,
+				ForceNew:         true,
+				ValidateFunc:     validation.IntBetween(1, 65535),
+				DiffSuppressFunc: securityGroupEntryDiffSuppressFunc,
+				Description:      "Port rule start port for TCP or UDP protocol.The required if protocol type is 'tcp' or 'udp'.",
 			},
 			"port_range_to": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:             schema.TypeInt,
+				Optional:         true,
+				ForceNew:         true,
+				ValidateFunc:     validation.IntBetween(1, 65535),
+				DiffSuppressFunc: securityGroupEntryDiffSuppressFunc,
+				Description:      "Port rule end port for TCP or UDP protocol.The required if protocol type is 'tcp' or 'udp'.",
 			},
 			"security_group_entry_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The ID of the entry.",
 			},
 		},
 	}
 }
 
-func resourceKsyunSecurityGroupEntryCreate(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).vpcconn
-	creates := []string{
-		"description",
-		"security_group_id",
-		"cidr_block",
-		"direction",
-		"protocol",
-		"icmp_type",
-		"icmp_code",
-		"port_range_from",
-		"port_range_to",
-	}
-	createSecurityGroupEntry := make(map[string]interface{})
-	createSecurityGroupEntry["IcmpType"] = "0"
-	createSecurityGroupEntry["IcmpCode"] = "0"
-	for _, v := range creates {
-		if v1, ok := d.GetOk(v); ok {
-			vv := Downline2Hump(v)
-			if v1 == -2 && (v == "icmp_type" || v == "icmp_code") {
-				delete(createSecurityGroupEntry, vv)
-			} else {
-				createSecurityGroupEntry[vv] = fmt.Sprintf("%v", v1)
-			}
-		}
-	}
-
-	var resp *map[string]interface{}
-	var err error
-	action := "AuthorizeSecurityGroupEntry"
-	logger.Debug(logger.ReqFormat, action, createSecurityGroupEntry)
-	resp, err = conn.AuthorizeSecurityGroupEntry(&createSecurityGroupEntry)
-	logger.Debug(logger.AllFormat, action, createSecurityGroupEntry, *resp, err)
+func resourceKsyunSecurityGroupEntryCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.CreateSecurityGroupEntry(d, resourceKsyunSecurityGroupEntry())
 	if err != nil {
-		return fmt.Errorf("error on creating SecurityGroupEntry, %s", err)
+		return fmt.Errorf("error on creating security group entry %q, %s", d.Id(), err)
 	}
-	idSet, ok := (*resp)["SecurityGroupEntryIdSet"]
-	if !ok {
-		return fmt.Errorf("AuthorizeSecurityGroupEntry Error  : no ids found")
-	}
-	ids, ok := idSet.([]interface{})
-	if !ok || len(ids) == 0 {
-		return fmt.Errorf("AuthorizeSecurityGroupEntry Error  : no ids found")
-	}
-	idres, ok := ids[0].(string)
-	if !ok {
-		return fmt.Errorf("AuthorizeSecurityGroupEntry Error : no id found")
-	}
-	if err := d.Set("security_group_entry_id", idres); err != nil {
-		return err
-	}
-	d.SetId(idres)
-	return nil
+	return resourceKsyunSecurityGroupEntryRead(d, meta)
 }
-func resourceKsyunSecurityGroupEntryRead(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).vpcconn
-	readSecurityGroup := make(map[string]interface{})
-	if _, ok := d.GetOk("security_group_id"); !ok {
-		return fmt.Errorf("security_group_id can't be null")
-	}
-	sgId := d.Get("security_group_id")
-	readSecurityGroup["SecurityGroupId.1"] = sgId
-
-	action := "DescribeSecurityGroups"
-	logger.Debug(logger.ReqFormat, action, readSecurityGroup)
-	resp, err := conn.DescribeSecurityGroups(&readSecurityGroup)
-	logger.Debug(logger.AllFormat, action, readSecurityGroup, *resp, err)
+func resourceKsyunSecurityGroupEntryRead(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.ReadAndSetSecurityGroupEntry(d, resourceKsyunSecurityGroupEntry())
 	if err != nil {
-		return fmt.Errorf("error on reading SecurityGroup %q, %s", d.Id(), err)
+		return fmt.Errorf("error on reading security group entry %q, %s", d.Id(), err)
 	}
-
-	itemset := (*resp)["SecurityGroupSet"]
-	items, ok := itemset.([]interface{})
-	if !ok || len(items) == 0 {
-		d.SetId("")
-		return nil
-	}
-	for _, v := range items {
-		item, ok := v.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if item["security_group_entry_id"] == d.Id() {
-			for sgk, sgv := range item {
-				if vpcSecurityGroupEntrySetKeys[sgk] {
-					if err := d.Set(Downline2Hump(sgk), sgv); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-	return nil
+	return err
 }
 
-func resourceKsyunSecurityGroupEntryDelete(d *schema.ResourceData, meta interface{}) error {
-	conn := meta.(*KsyunClient).vpcconn
-	//delete
-	if _, ok := d.GetOk("security_group_id"); !ok {
-		return fmt.Errorf("security_group_id can't be null")
+func resourceKsyunSecurityGroupEntryUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.ModifySecurityGroupEntry(d, resourceKsyunSecurityGroupEntry())
+	if err != nil {
+		return fmt.Errorf("error on updating security group entry %q, %s", d.Id(), err)
 	}
-	deleteSecurityGroupEntry := make(map[string]interface{})
-	deleteSecurityGroupEntry["SecurityGroupId"] = d.Get("security_group_id")
-	deleteSecurityGroupEntry["SecurityGroupEntryId"] = d.Id()
-	action := "RevokeSecurityGroupEntry"
-	logger.Debug(logger.ReqFormat, action, deleteSecurityGroupEntry)
-	resp, err0 := conn.RevokeSecurityGroupEntry(&deleteSecurityGroupEntry)
-	logger.Debug(logger.AllFormat, action, deleteSecurityGroupEntry, *resp, err0)
-	if err0 == nil || (err0 != nil && strings.Contains(err0.Error(), "NotFound")) {
-		return nil
+	return resourceKsyunSecurityGroupEntryRead(d, meta)
+}
+
+func resourceKsyunSecurityGroupEntryDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	vpcService := VpcService{meta.(*KsyunClient)}
+	err = vpcService.RemoveSecurityGroupEntry(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting security group entry %q, %s", d.Id(), err)
 	}
-	//check
-	readSecurityGroup := make(map[string]interface{})
-	readSecurityGroup["SecurityGroupId.1"] = d.Get("security_group_id")
-	action = "DescribeSecurityGroups"
-	logger.Debug(logger.ReqFormat, action, readSecurityGroup)
-	resp, err1 := conn.DescribeSecurityGroups(&readSecurityGroup)
-	logger.Debug(logger.AllFormat, action, readSecurityGroup, *resp, err1)
-	if err1 != nil && strings.Contains(err1.Error(), "NotFound") {
-		return nil
-	}
-	if err1 != nil {
-		return nil
-	}
-	itemSet, ok := (*resp)["SecurityGroupSet"]
-	if !ok {
-		return nil
-	}
-	items, ok := itemSet.([]interface{})
-	if !ok || len(items) == 0 {
-		return nil
-	}
-	for _, v := range items {
-		item, ok := v.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		sgeSet, ok := item["SecurityGroupEntrySet"]
-		if !ok {
-			continue
-		}
-		sges, ok := sgeSet.([]interface{})
-		if !ok {
-			continue
-		}
-		for k, sge := range sges {
-			sgeMap, ok := sge.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if sgeMap["SecurityGroupEntryId"] == d.Id() {
-				return fmt.Errorf("error on  deleting SecurityGroups %q, %s", d.Id(), err0)
-			}
-			if k == len(sges)-1 {
-				return nil
-			}
-		}
-	}
-	return fmt.Errorf("error on  deleting SecurityGroupEntrys %q, %s", d.Id(), err0)
+	return err
 }

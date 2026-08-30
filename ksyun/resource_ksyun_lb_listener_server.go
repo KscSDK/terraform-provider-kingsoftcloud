@@ -1,11 +1,35 @@
+/*
+Provides a Load Balancer Listener server resource.
+
+# Example Usage
+
+```hcl
+
+	resource "ksyun_lb_listener_server" "default" {
+	  listener_id = "3a520244-ddc1-41c8-9d2b-xxxxxxxxxxxx"
+	  real_server_ip = "10.0.77.20"
+	  real_server_port = 8000
+	  real_server_type = "host"
+	  instance_id = "3a520244-ddc1-41c8-9d2b-xxxxxxxxxxxx"
+	  weight = 10
+	}
+
+```
+
+# Import
+
+LB Listener can be imported using the `id`, e.g.
+
+```
+$ terraform import ksyun_lb_listener.example vserver-abcdefg
+```
+*/
 package ksyun
 
 import (
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"time"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
 
 func resourceKsyunInstancesWithListener() *schema.Resource {
@@ -20,190 +44,112 @@ func resourceKsyunInstancesWithListener() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"listener_id": {
-				Type:     schema.TypeString,
-				Required: true,
-			},
-			"instance_id": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The id of the listener.",
 			},
 			"real_server_ip": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The IP of real server.",
 			},
 			"real_server_port": {
-				Type:     schema.TypeInt,
-				Required: true,
+				Type:         schema.TypeInt,
+				Required:     true,
+				ValidateFunc: validation.IntBetween(1, 65535),
+				Description:  "The port of real server.Valid Values:1-65535.",
 			},
 			"real_server_type": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				ForceNew: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"host",
+					"DirectConnectGateway",
+					"VpnTunnel",
+				}, false),
+				Default:     "host",
+				Description: "The type of real server.Valid Values:'host', 'DirectConnectGateway', 'VpnTunnel'.",
+			},
+			"instance_id": {
+				Type:             schema.TypeString,
+				ForceNew:         true,
+				Optional:         true,
+				DiffSuppressFunc: lbRealServerDiffSuppressFunc,
+				Description:      "The ID of instance.",
 			},
 			"weight": {
-				Type:     schema.TypeInt,
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(1, 255),
+				Default:      1,
+				Description:  "The weight of backend service.Valid Values:1-255.",
+			},
+			"master_slave_type": {
+				Type:     schema.TypeString,
 				Optional: true,
-				Default:  1,
+				ValidateFunc: validation.StringInSlice([]string{
+					"Master",
+					"Slave",
+				}, false),
+				Default:          "Master",
+				DiffSuppressFunc: lbRealServerDiffSuppressFunc,
+				Description:      "whether real server is master of salve. when listener method is MasterSlave, this field is supported.",
 			},
 			"real_server_state": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "State of the real server.",
 			},
 
 			"register_id": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The registration ID of real server.",
+			},
+
+			"listener_method": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Forwarding mode of listener.",
 			},
 		},
 	}
 }
-func resourceKsyunInstancesWithListenerCreate(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	creates := []string{
-		"listener_id",
-		"real_server_ip",
-		"real_server_port",
-		"real_server_type",
-		"instance_id",
-		"weight",
-	}
-	req["Weight"] = "0"
-	for _, v := range creates {
-		if v1, ok := d.GetOk(v); ok {
-			vv := Downline2Hump(v)
-			req[vv] = fmt.Sprintf("%v", v1)
-		}
-	}
-	action := "RegisterInstancesWithListener"
-	logger.Debug(logger.ReqFormat, action, req)
-	resp, err := slbconn.RegisterInstancesWithListener(&req)
+func resourceKsyunInstancesWithListenerCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.CreateRealServer(d, resourceKsyunInstancesWithListener())
 	if err != nil {
-		return fmt.Errorf("create InstancesWithListener : %s", err)
+		return fmt.Errorf("error on creating real server %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-	id, ok := (*resp)["RegisterId"]
-	if !ok {
-		return fmt.Errorf("create InstancesWithListener : no HealthCheckId found")
-	}
-	idres, ok := id.(string)
-	if !ok {
-		return fmt.Errorf("create InstancesWithListener : no HealthCheckId found")
-	}
-	if err := d.Set("register_id", idres); err != nil {
-		return err
-	}
-	d.SetId(idres)
-	return resourceKsyunInstancesWithListenerRead(d, m)
+	return resourceKsyunInstancesWithListenerRead(d, meta)
 }
 
-func resourceKsyunInstancesWithListenerRead(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["RegisterId.1"] = d.Id()
-	action := "DescribeInstancesWithListener"
-	logger.Debug(logger.ReqFormat, action, req)
-
-	resp, err := slbconn.DescribeInstancesWithListener(&req)
+func resourceKsyunInstancesWithListenerRead(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.ReadAndSetRealServer(d, resourceKsyunInstancesWithListener())
 	if err != nil {
-		return fmt.Errorf(" read InstancesWithListeners : %s", err)
+		return fmt.Errorf("error on reading real server %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-	resSet := (*resp)["RealServerSet"]
-	res, ok := resSet.([]interface{})
-	if !ok || len(res) == 0 {
-		d.SetId("")
-		return nil
-	}
-	SetDByResp(d, res[0], serverKeys, map[string]bool{})
-	return nil
+	return err
 }
 
-func resourceKsyunInstancesWithListenerUpdate(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["RegisterId"] = d.Id()
-	allAttributes := []string{
-		"real_server_port",
-		"weight",
-	}
-	attributeUpdate := false
-	var updates []string
-	//Get the property that needs to be modified
-	for _, v := range allAttributes {
-		if d.HasChange(v) {
-			attributeUpdate = true
-			updates = append(updates, v)
-		}
-	}
-	if !attributeUpdate {
-		return nil
-	}
-	//Create a modification request
-	req["Weight"] = "0"
-	for _, v := range allAttributes {
-		if v1, ok := d.GetOk(v); ok {
-			req[Downline2Hump(v)] = fmt.Sprintf("%v", v1)
-		}
-	}
-	// Enable partial attribute modification
-	d.Partial(true)
-	action := "ModifyInstancesWithListener"
-	logger.Debug(logger.ReqFormat, action, req)
-
-	resp, err := slbconn.ModifyInstancesWithListener(&req)
+func resourceKsyunInstancesWithListenerUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.ModifyRealServer(d, resourceKsyunInstancesWithListener())
 	if err != nil {
-		return fmt.Errorf("update InstancesWithListener (%v)error:%v", req, err)
+		return fmt.Errorf("error on updating real server %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-
-	// Set partial modification properties
-	for _, v := range updates {
-		d.SetPartial(v)
-	}
-	d.Partial(false)
-	return resourceKsyunInstancesWithListenerRead(d, m)
+	return resourceKsyunInstancesWithListenerRead(d, meta)
 }
 
-func resourceKsyunInstancesWithListenerDelete(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["RegisterId"] = d.Id()
-	/*
-		_, err := slbconn.DeregisterInstancesFromListener(&req)
-		if err != nil {
-			return fmt.Errorf("delete InstancesWithListener error:%v", err)
-		}
-		return nil
-	*/
-	return resource.Retry(25*time.Minute, func() *resource.RetryError {
-		action := "DeregisterInstancesFromListener"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err1 := slbconn.DeregisterInstancesFromListener(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err1)
-		if err1 == nil || (err1 != nil && notFoundError(err1)) {
-			return nil
-		}
-		if err1 != nil && inUseError(err1) {
-			return resource.RetryableError(err1)
-		}
-
-		req := make(map[string]interface{})
-		req["RegisterId.1"] = d.Id()
-		action = "DescribeInstancesWithListener"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := slbconn.DescribeInstancesWithListener(&req)
-		if err != nil {
-			return resource.NonRetryableError(fmt.Errorf("error on reading Listener instance when deleting %q, %s", d.Id(), err))
-		}
-		logger.Debug(logger.RespFormat, action, req, *resp)
-		items, ok := (*resp)["RealServerSet"]
-		if !ok {
-			return nil
-		}
-		itemsspe, ok := items.([]interface{})
-		if !ok || len(itemsspe) == 0 {
-			return nil
-		}
-		return resource.RetryableError(fmt.Errorf(" the specified Listener instance %q has not been deleted due to unknown error", d.Id()))
-	})
+func resourceKsyunInstancesWithListenerDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.RemoveRealServer(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting real server %q, %s", d.Id(), err)
+	}
+	return err
 }

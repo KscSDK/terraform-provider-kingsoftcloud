@@ -1,11 +1,39 @@
+/*
+Provides an Health Check resource.
+
+# Example Usage
+
+```hcl
+
+	resource "ksyun_healthcheck" "default" {
+	  listener_id = "537e2e7b-0007-4a75-9749-882167dbc93d"
+	  health_check_state = "stop"
+	  healthy_threshold = 2
+	  interval = 20
+	  timeout = 200
+	  unhealthy_threshold = 2
+	  url_path = "/monitor"
+	  is_default_host_name = true
+	  host_name = "www.ksyun.com"
+	}
+
+```
+
+# Import
+
+HealthCheck can be imported using the id, e.g.
+
+```
+$ terraform import ksyun_healthcheck.default ${lb_type}:67b91d3c-c363-4f57-b0cd-xxxxxxxxxxxx
+```
+*/
 package ksyun
 
 import (
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/terraform-providers/terraform-provider-ksyun/logger"
-	"time"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
 
 func resourceKsyunHealthCheck() *schema.Resource {
@@ -15,249 +43,146 @@ func resourceKsyunHealthCheck() *schema.Resource {
 		Update: resourceKsyunHealthCheckUpdate,
 		Delete: resourceKsyunHealthCheckDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			State: importHealthcheck,
 		},
-
 		Schema: map[string]*schema.Schema{
 			"listener_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "The id of the listener.",
 			},
 			"health_check_state": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"start",
+					"stop",
+				}, false),
+				Default:     "start",
+				Description: "Status maintained by health examination.Valid Values:'start', 'stop'.",
 			},
+
+			"health_check_connect_port": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Description: "The port of connecting for health check.",
+			},
+
 			"healthy_threshold": {
-				Type:     schema.TypeInt,
-				Required: true,
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(1, 10),
+				Default:      5,
+				Description:  "Health threshold.Valid Values:1-10. Default is 5.",
 			},
 			"interval": {
-				Type:     schema.TypeInt,
-				Optional: true,
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(1, 3600),
+				Default:      5,
+				Description:  "Interval of health examination.Valid Values:1-3600. Default is 5.",
 			},
 			"timeout": {
-				Type:     schema.TypeInt,
-				Required: true,
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(1, 3600),
+				Default:      4,
+				Description:  "Health check timeout.Valid Values:1-3600. Default is 4.",
 			},
 			"unhealthy_threshold": {
-				Type:     schema.TypeInt,
-				Optional: true,
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(1, 10),
+				Default:      4,
+				Description:  "Unhealthy threshold.Valid Values:1-10. Default is 4.",
 			},
 			"url_path": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:             schema.TypeString,
+				Optional:         true,
+				Default:          "/",
+				DiffSuppressFunc: lbHealthCheckDiffSuppressFunc,
+				ValidateFunc:     validation.StringIsNotEmpty,
+				Description:      "Link to HTTP type listener health check.",
 			},
 			"is_default_host_name": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  true,
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "Whether the host name is default or not.",
 			},
 			"host_name": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:             schema.TypeString,
+				Optional:         true,
+				Computed:         true,
+				DiffSuppressFunc: lbHealthCheckDiffSuppressFunc,
+				Description:      "The service host name of the health check, which is available only for the HTTP or HTTPS health check.",
+			},
+
+			"http_method": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The http requests' method. Valid Value: GET|HEAD.",
+				ValidateFunc: validation.StringInSlice([]string{"GET", "HEAD"},
+					false),
 				Computed: true,
 			},
-			"health_check_id": {
+
+			"lb_type": {
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
+				Default:  "Slb",
+				ForceNew: true,
+				ValidateFunc: validation.StringInSlice([]string{"Alb", "Slb"},
+					false),
+				Description: "The type of listener. Valid Value: `Alb` and `Slb`. Default: `Slb`.",
+			},
+
+			"health_check_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "ID of the health check.",
+			},
+			"listener_protocol": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "protocol of the listener.",
 			},
 		},
 	}
 }
-func resourceKsyunHealthCheckCreate(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	/*
-		if v, ok := d.GetOk("listener_id"); ok {
-			req["ListenerId"] = v
-		}
-		if v, ok := d.GetOk("healthy_threshold"); ok {
-			req["HealthyThreshold"] = v
-		}
-		if v, ok := d.GetOk("interval"); ok {
-			req["Interval"] = v
-		}
-		if v, ok := d.GetOk("timeout"); ok {
-			req["Timeout"] = v
-		}
-		if v, ok := d.GetOk("unhealthy_threshold"); ok {
-			req["UnhealthyThreshold"] = v
-		}
-		if v, ok := d.GetOk("health_check_state"); ok {
-			req["HealthCheckState"] = v
-		}
-		if v, ok := d.GetOk("url_path"); ok {
-			req["UrlPath"] = v
-		}
-		if v, ok := d.GetOk("is_default_host_name"); ok {
-			req["IsDefaultHostName"] = v
-		}
-		if v, ok := d.GetOk("host_name"); ok {
-			req["HostName"] = v
-		}
-	*/
-	creates := []string{
-		"listener_id",
-		"healthy_threshold",
-		"interval",
-		"timeout",
-		"unhealthy_threshold",
-		"health_check_state",
-		"url_path",
-		"is_default_host_name",
-		"host_name",
-	}
-	for _, v := range creates {
-		if v1, ok := d.GetOk(v); ok {
-			vv := Downline2Hump(v)
-			req[vv] = fmt.Sprintf("%v", v1)
-		}
-	}
-	action := "ConfigureHealthCheck"
-	logger.Debug(logger.ReqFormat, action, req)
-
-	resp, err := slbconn.ConfigureHealthCheck(&req)
+func resourceKsyunHealthCheckCreate(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.CreateHealthCheck(d, resourceKsyunHealthCheck())
 	if err != nil {
-		return fmt.Errorf("create HealthCheck : %s", err)
+		return fmt.Errorf("error on creating health check %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-	id, ok := (*resp)["HealthCheckId"]
-	if !ok {
-		return fmt.Errorf("create HealthCheck : no HealthCheckId found")
-	}
-	idres, ok := id.(string)
-	if !ok {
-		return fmt.Errorf("create HealthCheck : no HealthCheckId found")
-	}
-	if err := d.Set("health_check_id", idres); err != nil {
-		return err
-	}
-	d.SetId(idres)
-	return resourceKsyunHealthCheckRead(d, m)
+	return resourceKsyunHealthCheckRead(d, meta)
 }
 
-func resourceKsyunHealthCheckRead(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["HealthCheckId.1"] = d.Id()
-	action := "DescribeHealthChecks"
-	logger.Debug(logger.ReqFormat, action, req)
-
-	resp, err := slbconn.DescribeHealthChecks(&req)
+func resourceKsyunHealthCheckRead(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.ReadAndSetHealCheck(d, resourceKsyunHealthCheck())
 	if err != nil {
-		return fmt.Errorf(" read HealthChecks : %s", err)
+		return fmt.Errorf("error on reading health check %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-
-	healthCheckSet := (*resp)["HealthCheckSet"]
-	health, ok := healthCheckSet.([]interface{})
-	if !ok || len(health) == 0 {
-		d.SetId("")
-		return nil
-	}
-	SetDByResp(d, health[0], healthCheckKeys, map[string]bool{})
-
-	return nil
+	return err
 }
 
-func resourceKsyunHealthCheckUpdate(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["HealthCheckId"] = d.Id()
-	if _, ok := d.GetOk("health_check_state"); !ok {
-		return fmt.Errorf("cann't change health_check_state to empty string")
-	}
-	allAttributes := []string{
-		"health_check_state",
-		"healthy_threshold",
-		"interval",
-		"timeout",
-		"unhealthy_threshold",
-		"is_default_host_name",
-		"host_name",
-		"url_path",
-	}
-	attributeUpdate := false
-	var updates []string
-	//Get the property that needs to be modified
-	for _, v := range allAttributes {
-		if d.HasChange(v) {
-			attributeUpdate = true
-			updates = append(updates, v)
-		}
-	}
-	if !attributeUpdate {
-		return nil
-	}
-	//Create a modification request
-	for _, v := range allAttributes {
-		if v1, ok := d.GetOk(v); ok {
-			req[Downline2Hump(v)] = fmt.Sprintf("%v", v1)
-		}
-	}
-	//Required word, though not modified
-	if _, ok := req["HealthCheckState"]; !ok {
-		req["HealthCheckState"] = d.Get("health_check_state")
-	}
-	// Enable partial attribute modification
-	d.Partial(true)
-	action := "ModifyHealthCheck"
-	logger.Debug(logger.ReqFormat, action, req)
-
-	resp, err := slbconn.ModifyHealthCheck(&req)
+func resourceKsyunHealthCheckUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.ModifyHealthCheck(d, resourceKsyunHealthCheck())
 	if err != nil {
-		return fmt.Errorf("update HealthCheck (%v)error:%v", req, err)
+		return fmt.Errorf("error on updating health check %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, req, *resp)
-	// Set partial modification properties
-	for _, v := range updates {
-		d.SetPartial(v)
-	}
-	d.Partial(false)
-	return resourceKsyunHealthCheckRead(d, m)
+	return resourceKsyunHealthCheckRead(d, meta)
 }
 
-func resourceKsyunHealthCheckDelete(d *schema.ResourceData, m interface{}) error {
-	slbconn := m.(*KsyunClient).slbconn
-	req := make(map[string]interface{})
-	req["HealthCheckId"] = d.Id()
-	/*
-		_, err := slbconn.DeleteHealthCheck(&req)
-		if err != nil {
-			return fmt.Errorf("delete HealthCheck error:%v", err)
-		}
-		return nil
-	*/
-	return resource.Retry(25*time.Minute, func() *resource.RetryError {
-		action := "DeleteHealthCheck"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err1 := slbconn.DeleteHealthCheck(&req)
-		logger.Debug(logger.AllFormat, action, req, *resp, err1)
-		if err1 == nil || (err1 != nil && notFoundError(err1)) {
-			return nil
-		}
-		if err1 != nil && inUseError(err1) {
-			return resource.RetryableError(err1)
-		}
-		req := make(map[string]interface{})
-		req["HealthCheckId.1"] = d.Id()
-		action = "DescribeHealthChecks"
-		logger.Debug(logger.ReqFormat, action, req)
-		resp, err := slbconn.DescribeHealthChecks(&req)
-		if err != nil {
-			return resource.NonRetryableError(fmt.Errorf("error on reading healthcheck when deleting %q, %s", d.Id(), err))
-		}
-		logger.Debug(logger.RespFormat, action, req, *resp)
-		items, ok := (*resp)["HealthCheckSet"]
-		if !ok {
-			return nil
-		}
-		itemsspe, ok := items.([]interface{})
-		if !ok || len(itemsspe) == 0 {
-			return nil
-		}
-		return resource.RetryableError(fmt.Errorf(" the specified healthcheck %q has not been deleted due to unknown error", d.Id()))
-	})
+func resourceKsyunHealthCheckDelete(d *schema.ResourceData, meta interface{}) (err error) {
+	slbService := SlbService{meta.(*KsyunClient)}
+	err = slbService.RemoveHealthCheck(d)
+	if err != nil {
+		return fmt.Errorf("error on deleting health check %q, %s", d.Id(), err)
+	}
+	return err
 }

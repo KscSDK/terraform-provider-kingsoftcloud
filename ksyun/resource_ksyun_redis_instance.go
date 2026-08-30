@@ -1,15 +1,112 @@
+/*
+Provides an redis instance resource.
+
+# Example Usage
+
+```hcl
+
+	variable "available_zone" {
+	  default = "cn-beijing-6a"
+	}
+
+	variable "subnet_name" {
+	  default = "ksyun_subnet_tf"
+	}
+
+	variable "vpc_name" {
+	  default = "ksyun_vpc_tf"
+	}
+
+	variable "vpc_cidr" {
+	  default = "10.1.0.0/21"
+	}
+
+	variable "protocol" {
+	  default = "4.0"
+	}
+
+	resource "ksyun_vpc" "default" {
+	  vpc_name   = "${var.vpc_name}"
+	  cidr_block = "${var.vpc_cidr}"
+	}
+
+	resource "ksyun_subnet" "default" {
+	  subnet_name      = "${var.subnet_name}"
+	  cidr_block = "10.1.0.0/21"
+	  subnet_type = "Normal"
+	  dhcp_ip_from = "10.1.0.2"
+	  dhcp_ip_to = "10.1.0.253"
+	  vpc_id  = "${ksyun_vpc.default.id}"
+	  gateway_ip = "10.1.0.1"
+	  dns1 = "198.18.254.41"
+	  dns2 = "198.18.254.40"
+	  available_zone = "${var.available_zone}"
+	}
+
+	resource "ksyun_redis_sec_group" "default" {
+	  available_zone = "${var.available_zone}"
+	  name = "testTerraform777"
+	  description = "testTerraform777"
+	}
+
+	resource "ksyun_redis_instance" "default" {
+	  available_zone        = "${var.available_zone}"
+	  name                  = "MyRedisInstance1101"
+	  mode                  = 2
+	  capacity              = 1
+	  slave_num              = 2
+	  net_type              = 2
+	  vnet_id               = "${ksyun_subnet.default.id}"
+	  vpc_id                = "${ksyun_vpc.default.id}"
+	  security_group_id     = "${ksyun_redis_sec_group.default.id}"
+	  bill_type             = 5
+	  duration              = ""
+	  duration_unit         = ""
+	  pass_word             = "Shiwo1101"
+	  iam_project_id        = "0"
+	  protocol              = "${var.protocol}"
+	  reset_all_parameters  = false
+	  timing_switch         = "On"
+	  timezone              = "07:00-08:00"
+	  available_zone        = "cn-beijing-6a"
+	  prepare_az_name       = "cn-beijing-6b"
+	  rr_az_name            = "cn-beijing-6a"
+	  parameters = {
+	    "appendonly"                  = "no",
+	    "appendfsync"                 = "everysec",
+	    "maxmemory-policy"            = "volatile-lru",
+	    "hash-max-ziplist-entries"    = "513",
+	    "zset-max-ziplist-entries"    = "129",
+	    "list-max-ziplist-size"       = "-2",
+	    "hash-max-ziplist-value"      = "64",
+	    "notify-keyspace-events"      = "",
+	    "zset-max-ziplist-value"      = "64",
+	    "maxmemory-samples"           = "5",
+	    "set-max-intset-entries"      = "512",
+	    "timeout"                     = "600",
+	  }
+	}
+
+```
+
+# Import
+
+redis  can be imported using the `id`, e.g.
+
+```
+$ terraform import ksyun_redis_instance.example xxxxxxxxx
+```
+*/
 package ksyun
 
 import (
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/KscSDK/ksc-sdk-go/service/kcsv1"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/terraform-providers/terraform-provider-ksyun/logger"
@@ -31,499 +128,517 @@ func resourceRedisInstance() *schema.Resource {
 			Update: schema.DefaultTimeout(3 * time.Hour),
 		},
 		Schema: map[string]*schema.Schema{
+			"available_zone": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "The Zone to launch the DB instance.",
+			},
 			"name": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "The name of DB instance.",
 			},
 			"mode": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				Computed: true,
-				ValidateFunc: func(i interface{}, k string) (s []string, es []error) {
-					v, ok := i.(int)
-					if !ok {
-						es = append(es, fmt.Errorf("expected type of %s to be int", k))
-						return
-					}
-
-					if v != 1 && v != 2 {
-						es = append(es, fmt.Errorf("expected %s to be in 1 or 2, got %d", k, v))
-						return
-					}
-
-					return
-				},
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ForceNew:     true,
+				Default:      2,
+				ValidateFunc: validation.IntBetween(1, 4),
+				Description:  "The KVStore instance system architecture required by the user. Valid values:  1(cluster),2(single),3(SelfDefineCluster).",
 			},
 			"capacity": {
-				Type:     schema.TypeInt,
-				Required: true,
+				Type:        schema.TypeInt,
+				Required:    true,
+				Description: "mem of redis, if mode is selfDefineCluster(mode=3) then capacity = shard_size * shard_num.",
 			},
 			"slave_num": {
-				Type:     schema.TypeInt,
-				Required: true,
-				//Optional: true,
-				//Computed: true,
-				//ValidateFunc: validation.IntBetween(0,8),
-			},
-			"net_type": {
-				Type:     schema.TypeInt,
-				Required: true,
-				ValidateFunc: func(i interface{}, k string) (s []string, es []error) {
-					v, ok := i.(int)
-					if !ok {
-						es = append(es, fmt.Errorf("expected type of %s to be int", k))
-						return
-					}
-
-					if v != 1 && v != 2 {
-						es = append(es, fmt.Errorf("expected %s to be in 1 or 2, got %d", k, v))
-						return
-					}
-
-					return
-				},
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Default:      0,
+				ForceNew:     true,
+				ValidateFunc: validation.IntBetween(0, 8),
+				Description:  "The readonly node num required by the user. Valid values: {0-7}.",
 			},
 			"vpc_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "Used to retrieve instances belong to specified VPC.",
 			},
 			"vnet_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "The ID of subnet. the instance will use the subnet in the current region.",
 			},
 			"bill_type": {
-				Type:     schema.TypeInt,
-				Optional: true,
-				Computed: true,
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Default:      5,
+				ForceNew:     true,
+				ValidateFunc: validation.IntInSlice([]int{1, 5, 87}),
+				Description:  "Valid values are 1 (Monthly), 5(Daily), 87(HourlyInstantSettlement).",
 			},
 			"duration": {
 				Type:     schema.TypeString,
 				Optional: true,
+				ForceNew: true,
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					if v, ok := d.GetOk("bill_type"); ok && v == 1 {
+						return false
+					}
+					return true
+				},
+				Description: "Only meaningful if bill_type is 1, Valid values:{1~36}.",
 			},
 			"duration_unit": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Default:     "MONTH",
+				Description: "Duration unit. Valid values: MONTH, YEAR. Default is MONTH.",
 			},
 			"pass_word": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Sensitive:   true,
+				Description: "The password of the  instance.The password is a string of 8 to 30 characters and must contain uppercase letters, lowercase letters, and numbers.",
 			},
 			"iam_project_id": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "The project instance belongs to.",
 			},
 			"protocol": {
 				Type:     schema.TypeString,
-				Required: true,
-			},
-			"cache_id": {
-				Type:     schema.TypeString,
+				Optional: true,
 				Computed: true,
+				ForceNew: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					"4.0",
+					"5.0",
+					"6.0",
+					"7.0",
+				}, false),
+				Description: "Engine version. Supported values: 4.0, 5.0, 6.0, 7.0.",
 			},
-			"az": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"available_zone": {
-				Type:     schema.TypeString,
-				Required: true,
+			"backup_time_zone": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "Auto backup time zone. Example: \"03:00-04:00\".",
 			},
 			"security_group_id": {
-				Type:     schema.TypeString,
-				Required: true,
-			},
-			"engine": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"size": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"port": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"vip": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"slave_vip": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"status": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"create_time": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"timing_switch": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"timezone": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"used_memory": {
-				Type:     schema.TypeFloat,
-				Computed: true,
-			},
-			"sub_order_id": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"product_id": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"order_type": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"order_use": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"source": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"service_status": {
-				Type:     schema.TypeInt,
-				Computed: true,
-			},
-			"service_begin_time": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"service_end_time": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"iam_project_name": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:             schema.TypeString,
+				Optional:         true,
+				ValidateFunc:     stringSplitSchemaValidateFunc(","),
+				DiffSuppressFunc: stringSplitDiffSuppressFunc(","),
+				Description:      "The id of security group.",
 			},
 			"reset_all_parameters": {
-				Type:     schema.TypeBool,
-				Required: true,
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "whether reset all parameters.",
 			},
 			"parameters": {
-				Type:     schema.TypeMap,
-				Optional: true,
+				Type:        schema.TypeMap,
+				Optional:    true,
+				Elem:        schema.TypeString,
+				Description: "Set of parameters needs to be set after instance was launched. Available parameters can refer to the  docs https://docs.ksyun.com/documents/1018.",
+			},
+			// "security_group_ids": {
+			//	Type:     schema.TypeSet,
+			//	Computed: true,
+			//	Elem: &schema.Schema{
+			//		Type: schema.TypeString,
+			//	},
+			//	Set: schema.HashString,
+			// },
+			"net_type": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Default:      2,
+				ValidateFunc: validation.IntBetween(2, 2),
+				Description:  "The network type. Valid values: 2(vpc).",
+			},
+
+			"cache_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The ID of cache.",
+			},
+			"az": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "availability zone.",
+			},
+			"timing_switch": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Default:     false,
+				Description: "auto backup On or Off.",
+			},
+			"timezone": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Default:     false,
+				Description: "Auto backup time zone. Example: \"03:00-04:00\".",
+			},
+			"shard_size": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(0, 1024),
+				Description:  "each shard mem size GB.",
+			},
+			"shard_num": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntBetween(0, 1024),
+				Description:  "shard number.",
+			},
+			"prepare_az_name": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "assign standby instance area.",
+			},
+			"rr_az_name": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "assign read only instance area.",
+			},
+			"delete_directly": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "Default is `false`, deleted instance will remain in the recycle bin. Setting the value to `true`, instance is permanently deleted without being recycled.",
+			},
+			"engine": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "engine.",
+			},
+			"size": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "size.",
+			},
+			"port": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "The port of the Redis instance. Default is 6379. Valid range: 1024-65535.",
+			},
+			"vip": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "vip.",
+			},
+			"slave_vip": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "slave vip.",
+			},
+			"status": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "status.",
+			},
+			"create_time": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "creation time.",
+			},
+			"used_memory": {
+				Type:        schema.TypeFloat,
+				Computed:    true,
+				Description: "used memory.",
+			},
+			"sub_order_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "sub order ID.",
+			},
+			"product_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "project id.",
+			},
+			"order_type": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "order type.",
+			},
+			"order_use": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "order use.",
+			},
+			"source": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "source.",
+			},
+			"service_status": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "service status.",
+			},
+			"service_begin_time": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "service begin time.",
+			},
+			"service_end_time": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "service end time.",
+			},
+			"iam_project_name": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "project name.",
+			},
+
+			"tags": tagsSchema(),
+			"product_type": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "Product type of the Redis instance.",
+			},
+			"replica_num": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "The number of replicas. Default is 1.",
+			},
+			"separation": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ForceNew:     true,
+				Default:      0,
+				ValidateFunc: validation.IntInSlice([]int{0, 1}),
+				Description:  "Read-write separation switch. 0 means off, 1 means on. Default is 0.",
+			},
+			"package_code": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "Package code of the Redis instance.",
 			},
 		},
 	}
 }
-
 func resourceRedisInstanceCreate(d *schema.ResourceData, meta interface{}) error {
-	// create instance
+	conn := meta.(*KsyunClient).kcsv1conn
 	var (
 		resp *map[string]interface{}
 		err  error
-		az   string
 	)
+	// valid parameters ...
+	// d.Set("delete_directly", d.Get("delete_directly"))
 
-	conn := meta.(*KsyunClient).kcsv1conn
-	createReq := make(map[string]interface{})
-	createParam := []string{"available_zone", "name", "capacity", "net_type", "vpc_id", "vnet_id", "mode", "slave_num", "bill_type", "duration", "duration_unit", "pass_word", "iam_project_id", "protocol", "security_group_id"}
-	for _, v := range createParam {
-		if v1, ok := d.GetOk(v); ok {
-			createReq[Downline2Hump(v)] = fmt.Sprintf("%v", v1)
-		}
+	// logger.Debug(logger.ReqFormat, "delete_directly", d.Get("delete_directly"))
+	createParam, err := resourceRedisInstanceParameterCheckAndPrepare(d, meta, false)
+	if err != nil {
+		return fmt.Errorf("error on creating instance: %s", err)
 	}
+	r := resourceRedisInstance()
+	transform := map[string]SdkReqTransform{
+		"reset_all_parameters": {Ignore: true},
+		"delete_directly":      {Ignore: true},
+		"parameters":           {Ignore: true},
+		"security_group_id":    {Ignore: true},
+		"product_type":         {mapping: "ProductType"},
+		"replica_num":          {mapping: "ReplicaNum"},
+		"separation":           {mapping: "Separation"},
+		"package_code":         {mapping: "PackageCode"},
+		"duration_unit":        {mapping: "DurationUnit"},
+		"protocol": {ValueFunc: func(d *schema.ResourceData) (interface{}, bool) {
+			v, ok := d.GetOk("protocol")
+			if ok {
+				return v, ok
+			}
+			_ = d.Set("protocol", "4.0")
+			return "4.0", true
+		}},
+	}
+	// generate req
+	createReq, err := SdkRequestAutoMapping(d, r, false, transform, nil, SdkReqParameter{
+		onlyTransform: false,
+	})
+	// create redis instance
 	action := "CreateCacheCluster"
 	logger.Debug(logger.ReqFormat, action, createReq)
-	if resp, err = conn.CreateCacheCluster(&createReq); err != nil {
+	resp, err = conn.CreateCacheCluster(&createReq)
+	if err != nil {
 		return fmt.Errorf("error on creating instance: %s", err)
 	}
 	logger.Debug(logger.RespFormat, action, createReq, *resp)
 	if resp != nil {
 		d.SetId((*resp)["Data"].(map[string]interface{})["CacheId"].(string))
 	}
-	if createReq["AvailableZone"] != nil {
-		az = createReq["AvailableZone"].(string)
-	}
-	stateConf := &resource.StateChangeConf{
-		Pending:    []string{statusPending},
-		Target:     []string{"2"},
-		Refresh:    stateRefreshForCreateFunc(conn, az, d.Id(), []string{"2"}),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
-		Delay:      20 * time.Second,
-		MinTimeout: 1 * time.Minute,
-	}
-	_, err = stateConf.WaitForState()
-	_ = resourceRedisInstanceRead(d, meta)
+	err = checkRedisInstanceStatus(d, meta, d.Timeout(schema.TimeoutCreate), "")
 	if err != nil {
 		return fmt.Errorf("error on create Instance: %s", err)
 	}
-	// create instance parameter
-	return resourceRedisInstanceParamCreate(d, meta)
-}
-
-func resourceRedisInstanceParamCreate(d *schema.ResourceData, meta interface{}) error {
-	var (
-		resp  *map[string]interface{}
-		param map[string]interface{}
-		az    string
-		err   error
-	)
-	v1, ok := d.GetOk("parameters")
-	if !ok || v1 == nil {
-		return nil
+	// AllocateSecurityGroup
+	err = modifyRedisInstanceSg(d, meta, false)
+	if err != nil {
+		return fmt.Errorf("error on create Instance: %s", err)
+	}
+	if len(*createParam) > 0 {
+		err = setResourceRedisInstanceParameter(d, meta, createParam)
+		if err != nil {
+			return fmt.Errorf("error on create Instance: %s", err)
+		}
+	}
+	if timingSwitch, ok := d.GetOk("timing_switch"); ok && strings.ToLower(timingSwitch.(string)) == "on" {
+		autoBackupReq := make(map[string]interface{})
+		autoBackupReq["CacheId"] = d.Id()
+		autoBackupReq["TimingSwitch"] = "On"
+		if timezone, ok := d.GetOk("timezone"); ok {
+			autoBackupReq["Timezone"] = timezone
+		} else {
+			return fmt.Errorf("error, timing_switch=on, but timezone is null. Timezone: %s", timezone)
+		}
+		backupAction := "SetTimingSnapshot"
+		logger.Debug(logger.ReqFormat, backupAction, autoBackupReq)
+		resp, err = conn.SetTimingSnapshot(&autoBackupReq)
+		if err != nil {
+			return fmt.Errorf("error on creating instance: %s", err)
+		}
+		logger.Debug(logger.RespFormat, action, autoBackupReq, *resp)
 	}
 
-	if v2, o := d.GetOk("reset_all_parameters"); o && !v2.(bool) {
-		conn := meta.(*KsyunClient).kcsv1conn
-		createReq := make(map[string]interface{})
-		if az, ok := d.GetOk("available_zone"); ok {
-			createReq["AvailableZone"] = az
-		}
-		createReq["CacheId"] = d.Get("cache_id")
-		createReq["Protocol"] = d.Get("protocol")
-		createReq["ResetAllParameters"] = fmt.Sprintf("%v", d.Get("reset_all_parameters"))
-
-		if param, ok = v1.(map[string]interface{}); !ok {
-			return fmt.Errorf("expected type of parameter to not be map")
-		}
-		if len(param) == 0 {
-			return nil
-		}
-		if err = validParam(d); err != nil {
+	client := meta.(*KsyunClient)
+	if d.HasChange("tags") {
+		tagService := TagService{client}
+		tagCall, err := tagService.ReplaceResourcesTagsWithResourceCall(d, resourceKsyunKrds(), "redis-instance", false, true)
+		if err != nil {
 			return err
 		}
-		params := v1.(map[string]interface{})
-		var i int
-		for k, v := range params {
-			i = i + 1
-			createReq[fmt.Sprintf("%v%v", "Parameters.ParameterName.", i)] = fmt.Sprintf("%v", k)
-			createReq[fmt.Sprintf("%v%v", "Parameters.ParameterValue.", i)] = fmt.Sprintf("%v", v)
-		}
-		action := "SetCacheParameters"
-		logger.Debug(logger.ReqFormat, action, createReq)
-		if resp, err = conn.SetCacheParameters(&createReq); err != nil {
-			return fmt.Errorf("error on set instance parameter: %s", err)
-		}
-		logger.Debug(logger.RespFormat, action, createReq, *resp)
-		if createReq["AvailableZone"] != nil {
-			az = createReq["AvailableZone"].(string)
-		}
-		stateConf := &resource.StateChangeConf{
-			Pending:    []string{statusPending},
-			Target:     []string{"2"},
-			Refresh:    stateRefreshForOperateFunc(conn, az, d.Id(), []string{"2"}),
-			Timeout:    d.Timeout(schema.TimeoutUpdate),
-			Delay:      10 * time.Second,
-			MinTimeout: 1 * time.Minute,
-		}
-		_, err = stateConf.WaitForState()
-		_ = resourceRedisInstanceParamRead(d, meta)
-		if err != nil {
-			return fmt.Errorf("error on set instance parameter: %s", err)
+		if err = tagCall.RightNow(d, client, false); err != nil {
+			return fmt.Errorf("touching tags error: %s", err)
 		}
 	}
-	return nil
+	return resourceRedisInstanceRead(d, meta)
 }
 
 func resourceRedisInstanceDelete(d *schema.ResourceData, meta interface{}) error {
-	var (
-		resp *map[string]interface{}
-		err  error
-	)
-
-	conn := meta.(*KsyunClient).kcsv1conn
 	deleteReq := make(map[string]interface{})
 	deleteReq["CacheId"] = d.Id()
-	if az, ok := d.GetOk("available_zone"); ok {
-		deleteReq["AvailableZone"] = az
-	}
-	action := "DeleteCacheCluster"
-	logger.Debug(logger.ReqFormat, action, deleteReq)
-	if resp, err = conn.DeleteCacheCluster(&deleteReq); err != nil {
-		return fmt.Errorf("error on deleting instance %q, %s", d.Id(), err)
-	}
-	logger.Debug(logger.RespFormat, action, deleteReq, *resp)
+	deleteReq["AvailableZone"] = d.Get("az")
+	deleteReq["DeleteDirectly"] = d.Get("delete_directly")
+
 	return resource.Retry(20*time.Minute, func() *resource.RetryError {
 		var (
 			resp *map[string]interface{}
 			err  error
 		)
-
-		queryReq := make(map[string]interface{})
-		queryReq["CacheId"] = d.Id()
-		if az, ok := d.GetOk("available_zone"); ok {
-			queryReq["AvailableZone"] = az
+		integrationAzConf := &IntegrationRedisAzConf{
+			resourceData: d,
+			client:       meta.(*KsyunClient),
+			req:          &deleteReq,
+			field:        "available_zone",
+			requestFunc: func() (*map[string]interface{}, error) {
+				conn := meta.(*KsyunClient).kcsv1conn
+				return conn.DeleteCacheCluster(&deleteReq)
+			},
 		}
-		action := "DescribeCacheCluster"
-		logger.Debug(logger.ReqFormat, action, queryReq)
-		if resp, err = conn.DescribeCacheCluster(&queryReq); err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "cannot be found") {
+		action := "DeleteCacheCluster"
+		logger.Debug(logger.ReqFormat, action, deleteReq)
+		resp, err = integrationAzConf.integrationRedisAz()
+		if err == nil {
+			return nil
+		}
+		logger.Debug(logger.RespFormat, action, deleteReq, resp)
+		_, err = describeRedisInstance(d, meta, "")
+		if err != nil {
+			if validateExists(err) {
 				return nil
 			}
 			return resource.NonRetryableError(err)
 		}
-		logger.Debug(logger.RespFormat, action, queryReq, *resp)
 		return resource.RetryableError(errors.New("deleting"))
 	})
 }
 
-func resourceRedisInstanceUpdate(d *schema.ResourceData, meta interface{}) error {
-	var (
-		resp   *map[string]interface{}
-		v      interface{}
-		params interface{}
-		err    error
-		ok     bool
-		az     string
-	)
+func resourceRedisInstanceUpdate(d *schema.ResourceData, meta interface{}) (err error) {
+	defer func(d *schema.ResourceData, meta interface{}) {
+		_err := resourceRedisInstanceRead(d, meta)
+		if err == nil {
+			err = _err
+		} else {
+			if _err != nil {
+				err = fmt.Errorf(err.Error()+" %s", _err)
+			}
+		}
 
-	d.Partial(true)
-	defer d.Partial(false)
-	conn := meta.(*KsyunClient).kcsv1conn
+	}(d, meta)
+
+	// valid parameters ...
+	createParam, err := resourceRedisInstanceParameterCheckAndPrepare(d, meta, true)
+	if err != nil {
+		return fmt.Errorf("error on update instance: %s", err)
+	}
+
 	// rename
-	if d.HasChange("name") {
-		d.SetPartial("name")
-		if v, ok = d.GetOk("name"); !ok {
-			return fmt.Errorf("cann't change name to empty string")
-		}
-		rename := make(map[string]interface{})
-		rename["CacheId"] = d.Id()
-		rename["Name"] = v.(string)
-		if az, ok := d.GetOk("available_zone"); ok {
-			rename["AvailableZone"] = az
-		}
-		action := "RenameCacheCluster"
-		logger.Debug(logger.ReqFormat, action, rename)
-		if resp, err = conn.RenameCacheCluster(&rename); err != nil {
-			return fmt.Errorf("error on rename instance %q, %s", d.Id(), err)
-		}
-		logger.Debug(logger.RespFormat, action, rename, *resp)
+	err = modifyRedisInstanceNameAndProject(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on update instance: %s", err)
 	}
 	// update password
-	if d.HasChange("pass_word") {
-		d.SetPartial("pass_word")
-		if v, ok = d.GetOk("pass_word"); !ok {
-			return fmt.Errorf("cann't change password to empty string")
-		}
-		password := make(map[string]interface{})
-		password["CacheId"] = d.Id()
-		password["Password"] = v.(string)
-		password["Mode"] = d.Get("mode")
-		if az, ok := d.GetOk("available_zone"); ok {
-			password["AvailableZone"] = az
-		}
-		action := "UpdatePassword"
-		logger.Debug(logger.ReqFormat, action, password)
-		if resp, err = conn.UpdatePassword(&password); err != nil {
-			return fmt.Errorf("error on update instance password %q, %s", d.Id(), err)
-		}
-		logger.Debug(logger.RespFormat, action, password, *resp)
+	err = modifyRedisInstancePassword(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on update instance: %s", err)
+	}
+	// sg
+	err = modifyRedisInstanceSg(d, meta, true)
+	if err != nil {
+		return fmt.Errorf("error on update instance: %s", err)
 	}
 	// resize mem
-	if d.HasChange("capacity") {
-		d.SetPartial("capacity")
-		if v, ok = d.GetOk("capacity"); !ok {
-			return fmt.Errorf("cann't resize capacity to empty string")
-		}
-		resize := make(map[string]interface{})
-		resize["CacheId"] = d.Id()
-		resize["Capacity"] = fmt.Sprintf("%v", v.(int))
-		if az, ok := d.GetOk("available_zone"); ok {
-			resize["AvailableZone"] = az
-		}
-		action := "ResizeCacheCluster"
-		logger.Debug(logger.ReqFormat, action, resize)
-		if resp, err = conn.ResizeCacheCluster(&resize); err != nil {
-			return fmt.Errorf("error on resize instance %q, %s", d.Id(), err)
-		}
-		logger.Debug(logger.RespFormat, action, resize, *resp)
-		if resize["AvailableZone"] != nil {
-			az = resize["AvailableZone"].(string)
-		}
-		stateConf := &resource.StateChangeConf{
-			Pending:    []string{statusPending},
-			Target:     []string{"2"},
-			Refresh:    stateRefreshForOperateFunc(conn, az, d.Id(), []string{"2"}),
-			Timeout:    d.Timeout(schema.TimeoutUpdate),
-			Delay:      20 * time.Second,
-			MinTimeout: 1 * time.Minute,
-		}
-		_, err = stateConf.WaitForState()
-		if err != nil {
-			return fmt.Errorf("error on update Instance: %s", err)
-		}
+	err = modifyRedisInstanceSpec(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on update instance: %s", err)
 	}
-	_ = resourceRedisInstanceRead(d, meta)
+	// auto backup time
+	err = modifyRedisInstanceAutoBackup(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on update instance: %s", err)
+	}
 
 	// update parameter
-	// parameters no change
-	if !d.HasChange("reset_all_parameters") && !d.HasChange("parameters") {
-		logger.Info("instance parameters have not changed")
-		return nil
+	if len(*createParam) > 0 {
+		err = setResourceRedisInstanceParameter(d, meta, createParam)
+		if err != nil {
+			return fmt.Errorf("error on create Instance: %s", err)
+		}
 	}
+	err = d.Set("reset_all_parameters", d.Get("reset_all_parameters"))
 
-	updateReq := make(map[string]interface{})
-	updateReq["CacheId"] = d.Get("cache_id")
-	updateReq["protocol"] = d.Get("protocol")
-	if az, ok := d.GetOk("available_zone"); ok {
-		updateReq["AvailableZone"] = az
-	}
-
-	reset := d.Get("reset_all_parameters")
-	updateReq["ResetAllParameters"] = fmt.Sprintf("%v", reset)
-	if !reset.(bool) {
-		if params, ok = d.GetOk("parameters"); !ok {
-			logger.Info("instance parameters do not exist")
-			return nil
-		}
-		param, ok1 := params.(map[string]interface{})
-		if !ok1 {
-			logger.Info("type of instance parameters must be map")
-			return nil
-		}
-		if len(param) == 0 {
-			logger.Info("instance parameters size : 0")
-			return nil
-		}
-		if err := validParam(d); err != nil {
+	client := meta.(*KsyunClient)
+	if d.HasChange("tags") {
+		tagService := TagService{client}
+		tagCall, err := tagService.ReplaceResourcesTagsWithResourceCall(d, resourceKsyunKrds(), "redis-instance", false, true)
+		if err != nil {
 			return err
 		}
-		var i int
-		for k, v := range param {
-			i = i + 1
-			updateReq[fmt.Sprintf("%v%v", "Parameters.ParameterName.", i)] = fmt.Sprintf("%v", k)
-			updateReq[fmt.Sprintf("%v%v", "Parameters.ParameterValue.", i)] = fmt.Sprintf("%v", v)
+		if err = tagCall.RightNow(d, client, false); err != nil {
+			return fmt.Errorf("touching tags error: %s", err)
 		}
 	}
-
-	action := "SetCacheParameters"
-	logger.Debug(logger.ReqFormat, action, updateReq)
-	if resp, err = conn.SetCacheParameters(&updateReq); err != nil {
-		return fmt.Errorf("error on set instance parameter: %s", err)
-	}
-	logger.Debug(logger.RespFormat, action, updateReq, *resp)
-	if updateReq["AvailableZone"] != nil {
-		az = updateReq["AvailableZone"].(string)
-	}
-	stateConf := &resource.StateChangeConf{
-		Pending:    []string{statusPending},
-		Target:     []string{"2"},
-		Refresh:    stateRefreshForOperateFunc(conn, az, d.Id(), []string{"2"}),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
-		Delay:      10 * time.Second,
-		MinTimeout: 1 * time.Minute,
-	}
-	_, err = stateConf.WaitForState()
-	_ = resourceRedisInstanceParamRead(d, meta)
-	if err != nil {
-		return fmt.Errorf("error on set instance parameter: %s", err)
-	}
-	return nil
+	return err
 }
 
 func resourceRedisInstanceRead(d *schema.ResourceData, meta interface{}) error {
@@ -534,538 +649,76 @@ func resourceRedisInstanceRead(d *schema.ResourceData, meta interface{}) error {
 		err  error
 	)
 
-	conn := meta.(*KsyunClient).kcsv1conn
-	queryReq := make(map[string]interface{})
-	queryReq["CacheId"] = d.Id()
-	if az, ok := d.GetOk("available_zone"); ok {
-		queryReq["AvailableZone"] = az
-	}
-	action := "DescribeCacheCluster"
-	logger.Debug(logger.ReqFormat, action, queryReq)
-	if resp, err = conn.DescribeCacheCluster(&queryReq); err != nil {
+	resp, err = describeRedisInstance(d, meta, "")
+	if err != nil {
+		if validateRedisSgExists(err) {
+			d.SetId("")
+			return nil
+		}
 		return fmt.Errorf("error on reading instance %q, %s", d.Id(), err)
 	}
-	logger.Debug(logger.RespFormat, action, queryReq, *resp)
-	if item, ok = (*resp)["Data"].(map[string]interface{}); !ok {
+	if item, ok = (*resp)["Data"].(map[string]interface{}); !ok || len(item) == 0 {
+		d.SetId("")
 		return nil
 	}
-	result := make(map[string]interface{})
+	// merge some field
+	add := make(map[string]interface{})
 	for k, v := range item {
-		if k == "protocol" || k == "slaveNum" || !redisInstanceKeys[k] {
-			continue
-		}
-		result[Hump2Downline(k)] = v
-	}
-	for k, v := range result {
-		if err := d.Set(k, v); err != nil {
-			return fmt.Errorf("error set data %v :%v", v, err)
+		if k == "az" {
+			add["availableZone"] = v
 		}
 	}
+	if _, ok = item["slaveNum"]; !ok {
+		item["slaveNum"] = 0
+	}
+	for k, v := range add {
+		item[k] = v
+	}
+	extra := make(map[string]SdkResponseMapping)
+	extra["protocol"] = SdkResponseMapping{
+		Field: "protocol",
+		FieldRespFunc: func(i interface{}) interface{} {
+			return strings.Replace(i.(string), "redis ", "", -1)
+		},
+	}
+	extra["size"] = SdkResponseMapping{
+		Field: "capacity",
+	}
+	extra["productType"] = SdkResponseMapping{
+		Field: "product_type",
+	}
+	extra["replicaNum"] = SdkResponseMapping{
+		Field: "replica_num",
+	}
+	extra["separation"] = SdkResponseMapping{
+		Field: "separation",
+	}
+	extra["packageCode"] = SdkResponseMapping{
+		Field: "package_code",
+	}
+	extra["durationUnit"] = SdkResponseMapping{
+		Field: "duration_unit",
+	}
 
-	//resourceRedisInstanceParamRead(d, meta)
-	return nil
-}
-
-func resourceRedisInstanceParamRead(d *schema.ResourceData, meta interface{}) error {
-	var (
-		resp *map[string]interface{}
-		err  error
-	)
-	conn := meta.(*KsyunClient).kcsv1conn
-	readReq := make(map[string]interface{})
-	readReq["CacheId"] = d.Id()
-	if az, ok := d.GetOk("available_zone"); ok {
-		readReq["AvailableZone"] = az
-	}
-	action := "DescribeCacheParameters"
-	logger.Debug(logger.ReqFormat, action, readReq)
-	if resp, err = conn.DescribeCacheParameters(&readReq); err != nil {
-		return fmt.Errorf("error on reading instance parameter %q, %s", d.Id(), err)
-	}
-	logger.Debug(logger.RespFormat, action, readReq, *resp)
-	data := (*resp)["Data"].([]interface{})
-	if len(data) == 0 {
-		logger.Info("instance parameters result size : 0")
-		return nil
-	}
-	result := make(map[string]interface{})
-	for _, d := range data {
-		param := d.(map[string]interface{})
-		result[param["name"].(string)] = fmt.Sprintf("%v", param["currentValue"])
-	}
-	if err := d.Set("parameters", result); err != nil {
-		return fmt.Errorf("error set data %v :%v", result, err)
-	}
-	return nil
-}
-
-func stateRefreshForCreateFunc(client *kcsv1.Kcsv1, az, instanceId string, target []string) resource.StateRefreshFunc {
-	return func() (interface{}, string, error) {
-		var (
-			resp *map[string]interface{}
-			item map[string]interface{}
-			ok   bool
-			err  error
-		)
-
-		queryReq := map[string]interface{}{"CacheId": instanceId}
-		queryReq["AvailableZone"] = az
-		action := "DescribeCacheCluster"
-		logger.Debug(logger.ReqFormat, action, queryReq)
-		if resp, err = client.DescribeCacheCluster(&queryReq); err != nil {
-			return nil, "", err
-		}
-		logger.Debug(logger.RespFormat, action, queryReq, *resp)
-		if item, ok = (*resp)["Data"].(map[string]interface{}); !ok {
-			return nil, "", fmt.Errorf("no instance information was queried.%s", "")
-		}
-		status := int(item["status"].(float64))
-		serviceStatus := int(item["serviceStatus"].(float64))
-		// instance status error
-		if status == 0 || status == 99 {
-			return nil, "", fmt.Errorf("instance create error,status:%v", status)
-		}
-		// trade instance status error
-		if serviceStatus == 3 {
-			return nil, "", fmt.Errorf("instance create error,serviceStatus:%v", serviceStatus)
-		}
-		state := strconv.Itoa(status)
-		for k, v := range target {
-			if v == state && serviceStatus == 2 {
-				return resp, state, nil
-			}
-			if k == len(target)-1 {
-				state = statusPending
-			}
-		}
-		return resp, state, nil
-	}
-}
-
-func stateRefreshForOperateFunc(client *kcsv1.Kcsv1, az, instanceId string, target []string) resource.StateRefreshFunc {
-	return func() (interface{}, string, error) {
-		var (
-			resp *map[string]interface{}
-			item map[string]interface{}
-			ok   bool
-			err  error
-		)
-
-		queryReq := map[string]interface{}{"CacheId": instanceId}
-		queryReq["AvailableZone"] = az
-		action := "DescribeCacheCluster"
-		logger.Debug(logger.ReqFormat, action, queryReq)
-		if resp, err = client.DescribeCacheCluster(&queryReq); err != nil {
-			return nil, "", err
-		}
-		logger.Debug(logger.RespFormat, action, queryReq, *resp)
-		if item, ok = (*resp)["Data"].(map[string]interface{}); !ok {
-			return nil, "", fmt.Errorf("no instance information was queried.%s", "")
-		}
-		status := int(item["status"].(float64))
-		if status == 0 || status == 99 {
-			return nil, "", fmt.Errorf("instance operate error,status:%v", status)
-		}
-		state := strconv.Itoa(status)
-		for k, v := range target {
-			if v == state {
-				return resp, state, nil
-			}
-			if k == len(target)-1 {
-				state = statusPending
-			}
-		}
-
-		return resp, state, nil
-	}
-}
-
-func validParam(d *schema.ResourceData) error {
-	var (
-		param map[string]interface{}
-		ok    bool
-	)
-	protocol := d.Get("protocol")
-	v1, ok := d.GetOk("parameters")
-	if !ok || v1 == nil {
-		return fmt.Errorf("parameter to not be null")
-	}
-	if param, ok = v1.(map[string]interface{}); !ok {
-		return fmt.Errorf("expected type of parameter to not be map")
-	}
-	var filter map[string]*ValidatorParam
-	if protocol == "4.0" || protocol == "5.0" {
-		filter = GetValidatorParamForProto4()
-	} else {
-		filter = GetValidatorParamForProto()
-	}
-	for key, value := range param {
-		result := filter[key]
-		if result == nil {
-			return fmt.Errorf("expected %s to be in range %v", key, filter)
-		}
-		if result.Valid.Type == "enum" {
-			var ok bool
-			for _, val := range result.Valid.Values {
-				if val == value.(string) {
-					ok = true
-				}
-			}
-			if !ok {
-				return fmt.Errorf("expected value of %s to in %v", key, result.Valid.Values)
-			}
-		} else if result.Valid.Type == "range" {
-			v, ok := value.(string)
-			if !ok {
-				return fmt.Errorf("expected type of %v to be int", key)
-			}
-			val, _ := strconv.ParseInt(v, 10, 64)
-			if val < result.Valid.Min || val > result.Valid.Max {
-				return fmt.Errorf("expected value of %s to be in range [%v-%v]", key, result.Valid.Min, result.Valid.Max)
-			}
-		} else {
-			if ok := regexp.MustCompile(result.Valid.Value).MatchString(value.(string)); !ok {
-				return fmt.Errorf("expected value of %s to match regular expression %v", key, result.Valid.Value)
-			}
+	if _, ok := d.GetOk("tags"); ok {
+		err = mergeTagsData(d, &item, meta.(*KsyunClient), "redis-instance")
+		if err != nil {
+			return fmt.Errorf("reading tags error: %s", err)
 		}
 	}
-	return nil
-}
+	SdkResponseAutoResourceData(d, resourceRedisInstance(), item, extra)
 
-type Validity struct {
-	Type     string
-	DataType string
-	Value    string
-	Values   []string
-	Min      int64
-	Max      int64
-}
+	// merge parameters
+	err = resourceRedisInstanceParamRead(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on reading instance %q, %s", d.Id(), err)
+	}
 
-type ValidatorParam struct {
-	Name  string
-	Desc  string
-	Valid *Validity
-}
+	// merge securityGroupIds
+	err = resourceRedisInstanceSgRead(d, meta)
+	if err != nil {
+		return fmt.Errorf("error on reading instance %q, %s", d.Id(), err)
+	}
 
-var filterForProto4 map[string]*ValidatorParam
-var onceFor4 sync.Once
-
-func GetValidatorParamForProto4() map[string]*ValidatorParam {
-	onceFor4.Do(func() {
-		filterForProto4 = make(map[string]*ValidatorParam)
-		filterForProto4["appendonly"] = &ValidatorParam{
-			Name: "appendonly",
-			Desc: "是否开启AOF持久化功能",
-			Valid: &Validity{
-				Type:     "enum",
-				DataType: "string",
-				Value:    "",
-				Values:   []string{"yes", "no"},
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto4["appendfsync"] = &ValidatorParam{
-			Name: "appendfsync",
-			Desc: "AOF文件同步方式",
-			Valid: &Validity{
-				Type:     "enum",
-				DataType: "string",
-				Value:    "",
-				Values:   []string{"everysec", "always", "no"},
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto4["maxmemory-policy"] = &ValidatorParam{
-			Name: "maxmemory-policy",
-			Desc: "Redis淘汰策略",
-			Valid: &Validity{
-				Type:     "enum",
-				DataType: "string",
-				Value:    "",
-				Values:   []string{"volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl", "allkeys-lru", "allkeys-lfu", "allkeys-random", "noeviction"},
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto4["maxmemory-samples"] = &ValidatorParam{
-			Name: "maxmemory-samples",
-			Desc: "淘汰算法运行时的采样数",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      1,
-				Max:      10,
-			},
-		}
-		filterForProto4["hash-max-ziplist-entries"] = &ValidatorParam{
-			Name: "hash-max-ziplist-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto4["hash-max-ziplist-value"] = &ValidatorParam{
-			Name: "hash-max-ziplist-value",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto4["list-max-ziplist-size"] = &ValidatorParam{
-			Name: "list-max-ziplist-size",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      -2147483648,
-				Max:      2147483647,
-			},
-		}
-		filterForProto4["set-max-intset-entries"] = &ValidatorParam{
-			Name: "set-max-intset-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto4["zset-max-ziplist-entries"] = &ValidatorParam{
-			Name: "zset-max-ziplist-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto4["zset-max-ziplist-value"] = &ValidatorParam{
-			Name: "zset-max-ziplist-value",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto4["notify-keyspace-events"] = &ValidatorParam{
-			Name: "notify-keyspace-events",
-			Desc: "键空间通知配置",
-			Valid: &Validity{
-				Type:     "regexp",
-				DataType: "string",
-				Value:    "[KEg$lshzxeA]*",
-				Values:   nil,
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto4["timeout"] = &ValidatorParam{
-			Name: "timeout",
-			Desc: "连接空闲超时时间",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      86400,
-			},
-		}
-	})
-
-	return filterForProto4
-}
-
-var filterForProto map[string]*ValidatorParam
-var once sync.Once
-
-func GetValidatorParamForProto() map[string]*ValidatorParam {
-	once.Do(func() {
-		filterForProto = make(map[string]*ValidatorParam)
-		filterForProto["appendonly"] = &ValidatorParam{
-			Name: "appendonly",
-			Desc: "是否开启AOF持久化功能",
-			Valid: &Validity{
-				Type:     "enum",
-				DataType: "string",
-				Value:    "",
-				Values:   []string{"yes", "no"},
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto["appendfsync"] = &ValidatorParam{
-			Name: "appendfsync",
-			Desc: "AOF文件同步方式",
-			Valid: &Validity{
-				Type:     "enum",
-				DataType: "string",
-				Value:    "",
-				Values:   []string{"everysec", "always", "no"},
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto["maxmemory-policy"] = &ValidatorParam{
-			Name: "maxmemory-policy",
-			Desc: "Redis淘汰策略",
-			Valid: &Validity{
-				Type:     "enum",
-				DataType: "string",
-				Value:    "",
-				Values:   []string{"volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl", "allkeys-lru", "allkeys-lfu", "allkeys-random", "noeviction"},
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto["maxmemory-samples"] = &ValidatorParam{
-			Name: "maxmemory-samples",
-			Desc: "淘汰算法运行时的采样数",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      1,
-				Max:      10,
-			},
-		}
-		filterForProto["hash-max-ziplist-entries"] = &ValidatorParam{
-			Name: "hash-max-ziplist-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto["hash-max-ziplist-value"] = &ValidatorParam{
-			Name: "hash-max-ziplist-value",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto["list-max-ziplist-entries"] = &ValidatorParam{
-			Name: "list-max-ziplist-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto["list-max-ziplist-value"] = &ValidatorParam{
-			Name: "list-max-ziplist-value",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-
-		filterForProto["set-max-intset-entries"] = &ValidatorParam{
-			Name: "set-max-intset-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto["zset-max-ziplist-entries"] = &ValidatorParam{
-			Name: "zset-max-ziplist-entries",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto["zset-max-ziplist-value"] = &ValidatorParam{
-			Name: "zset-max-ziplist-value",
-			Desc: "内部数据结构优化的阈值",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      9007199254740990,
-			},
-		}
-		filterForProto["notify-keyspace-events"] = &ValidatorParam{
-			Name: "notify-keyspace-events",
-			Desc: "键空间通知配置",
-			Valid: &Validity{
-				Type:     "regexp",
-				DataType: "string",
-				Value:    "[KEg$lshzxeA]*",
-				Values:   nil,
-				Min:      0,
-				Max:      0,
-			},
-		}
-		filterForProto["timeout"] = &ValidatorParam{
-			Name: "timeout",
-			Desc: "连接空闲超时时间",
-			Valid: &Validity{
-				Type:     "range",
-				DataType: "integer",
-				Value:    "",
-				Values:   nil,
-				Min:      0,
-				Max:      86400,
-			},
-		}
-	})
-
-	return filterForProto
+	return d.Set("reset_all_parameters", d.Get("reset_all_parameters"))
 }
